@@ -279,8 +279,10 @@ function compile(compileInstruction, requester) {
                         filename: debugSourceMatches[3]
                     });
                 } else if( session.evaluatingExpression ) {
+                    session.evaluatingExpression = false;
                     requester.send('play-evaluated-expression', jsonResponse.cmdOutput, sessionId);
                 } else if( session.listingVariables ) {
+                    session.listingVariables = false;
                     requester.send('return-variables-list', jsonResponse.cmdOutput, sessionId);
                 }
             }
@@ -383,7 +385,7 @@ ipc.on("evaluate-expression", (event, expressionText, sessionId) => {
     if( session ) {
         if( session.process ) {
             session.evaluatingExpression = true;
-            session.process.stdin.write(`"${expressionText}"\n`);
+            session.process.stdin.write(`${expressionText}\n`);
         }
     }
 });
