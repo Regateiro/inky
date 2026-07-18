@@ -7,7 +7,7 @@ const {AppMenus} = require('./appmenus.js');
 const {onForceQuit} = require('./forceQuitDetect');
 const {Inklecate} = require("./inklecate.js");
 const { fstat } = require('original-fs');
-const {fs} = require("fs");
+const fs = require("fs");
 
 
 function inkJSNeedsUpdating() {
@@ -284,9 +284,21 @@ app.on('ready', function () {
         pendingPathToOpen = null;
     }
     
-    // Otherwise, show new empty window
+    // Otherwise, open most recent file or show new empty window
     else {
-        ProjectWindow.createEmpty();
+        let recentFiles = ProjectWindow.getRecentFiles();
+        let opened = false;
+        if (recentFiles.length > 0 && fs.existsSync(recentFiles[0])) {
+            try {
+                ProjectWindow.open(recentFiles[0]);
+                opened = true;
+            } catch(e) {
+                console.error("Failed to open recent file:", e);
+            }
+        }
+        if (!opened) {
+            ProjectWindow.createEmpty();
+        }
     }
 
     // Setup last stored theme
