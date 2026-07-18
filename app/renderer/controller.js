@@ -314,31 +314,22 @@ ExpressionWatchView.eventEmitter.on("change", () => {
 
 ExpressionWatchView.eventEmitter.on("queryVariable", (varName) => {
     debugTrace("ExpressionWatchView.queryVariable", varName);
-    console.log("queryVariable: starting query for", varName);
-    LiveCompiler.evaluateExpressions([varName], (results) => {
-        console.log("queryVariable: got results", results);
-        const result = results[0];
-        if (result.error) {
-            ExpressionWatchView.showVariableResult("Error: " + result.error);
+    LiveCompiler.evaluateExpression(varName, (result, error) => {
+        if( error ) {
+            ExpressionWatchView.showVariableResult("Error: " + error);
         } else {
-            ExpressionWatchView.showVariableResult(varName + " = " + result.result);
+            ExpressionWatchView.showVariableResult(varName + " = " + result);
         }
     });
 });
 
 ExpressionWatchView.eventEmitter.on("listVariables", () => {
     debugTrace("ExpressionWatchView.listVariables");
-    console.log("listVariables: starting");
+    debug("listVariables: starting");
     
     // Get all variables from all files
     const inkCompleter = require("./inkCompleter.js").inkCompleter;
-    console.log("listVariables: inkCompleter.inkFiles.length =", inkCompleter.inkFiles ? inkCompleter.inkFiles.length : "undefined");
-    
-    if (!inkCompleter.inkFiles || inkCompleter.inkFiles.length === 0) {
-        console.log("listVariables: no ink files found");
-        ExpressionWatchView.showVariableResult("No ink files found.");
-        return;
-    }
+    debug("listVariables: inkCompleter.inkFiles.length =", inkCompleter.inkFiles.length);
     
     const allVariables = new Set();
     inkCompleter.inkFiles.forEach(file => {
@@ -346,44 +337,50 @@ ExpressionWatchView.eventEmitter.on("listVariables", () => {
         try {
             file.symbols.parse();
         } catch(e) {
-            console.log("listVariables: failed to parse symbols for", file.filename(), e);
+            debug("listVariables: failed to parse symbols for", file.filename(), e);
         }
         const vars = file.symbols.getCachedVariables();
-        console.log("listVariables: file", file.filename(), "has", vars ? vars.size : "undefined", "variables");
-        if (vars) {
-            vars.forEach(v => {
-                console.log("listVariables: adding variable:", v);
-                allVariables.add(v);
-            });
-        }
+        debug("listVariables: file", file.filename(), "has", vars.size, "variables");
+        vars.forEach(v => allVariables.add(v));
     });
     
-    console.log("listVariables: total variables found:", allVariables.size);
+    debug("listVariables: total variables found:", allVariables.size);
     
     if (allVariables.size === 0) {
-        console.log("listVariables: no variables found, showing message");
+        debug("listVariables: no variables found, showing message");
         ExpressionWatchView.showVariableResult("No variables found in the project.");
         return;
     }
     
-    // Query all variables at once
+    // Query each variable sequentially and collect results
+    const results = [];
     const varArray = Array.from(allVariables).sort();
-    console.log("listVariables: will query variables:", varArray);
     
-    LiveCompiler.evaluateExpressions(varArray, (results) => {
-        console.log("listVariables: got results:", results);
-        const output = [];
-        for (let i = 0; i < varArray.length; i++) {
-            const varName = varArray[i];
-            const result = results[i];
-            if (result.error) {
-                output.push(`${varName} = <error: ${result.error}>`);
-            } else {
-                output.push(`${varName} = ${result.result}`);
-            }
+    function queryNext(index) {
+        if (index >= varArray.length) {
+            // All queries complete, display results
+            debug("listVariables: all queries complete, showing results");
+            ExpressionWatchView.showVariableResult(results.join("\n"));
+            return;
         }
-        ExpressionWatchView.showVariableResult(output.join("\n"));
-    });
+        
+        const varName = varArray[index];
+        debug("listVariables: querying variable:", varName);
+        
+        LiveCompiler.evaluateExpression(varName, (result, error) => {
+            debug("listVariables: got result for", varName, "result:", result, "error:", error);
+            if (error) {
+                results.push(`${varName} = <error: ${error}>`);
+            } else {
+                results.push(`${varName} = ${result}`);
+            }
+            // Query next variable
+            queryNext(index + 1);
+        });
+    }
+    
+    // Start querying from the first variable
+    queryNext(0);
 });
 
 ToolbarView.on("toggleSidebar", (id, buttonId) => {
