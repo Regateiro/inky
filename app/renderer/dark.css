@@ -247,6 +247,21 @@
     background: #444 !important;
 }
 
+.window.dark .pathJumpAutocomplete {
+    background: #282828;
+    border-color: #444;
+}
+
+.window.dark .pathJumpAutocomplete-item {
+    color: #CCC;
+    border-bottom-color: #444;
+}
+
+.window.dark .pathJumpAutocomplete-item:hover,
+.window.dark .pathJumpAutocomplete-item.selected {
+    background: #3A3A3A;
+}
+
 .window.dark #toolbar .issue-popup {
     background: #282828;
     border-color: #444;

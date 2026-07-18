@@ -919,6 +919,7 @@ img.issue-icon.warning {
   margin-right: 5px;
   vertical-align: middle;
   -webkit-app-region: no-drag;
+  position: relative;
 }
 
 #toolbar .pathJumpInput {
@@ -954,6 +955,36 @@ img.issue-icon.warning {
 
 #toolbar .pathJumpGo:hover {
   background: #EEE;
+}
+
+.pathJumpAutocomplete {
+  position: absolute;
+  background: white;
+  border: 1px solid #CCC;
+  border-radius: 3px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: 1000;
+  min-width: 200px;
+  margin-top: 2px;
+}
+
+.pathJumpAutocomplete-item {
+  padding: 6px 10px;
+  font-size: 9pt;
+  font-family: Monaco, monospace;
+  cursor: pointer;
+  border-bottom: 1px solid #EEE;
+}
+
+.pathJumpAutocomplete-item:last-child {
+  border-bottom: none;
+}
+
+.pathJumpAutocomplete-item:hover,
+.pathJumpAutocomplete-item.selected {
+  background: #E8F0FE;
 }
 
 /* Toolbar buttons and spinner */

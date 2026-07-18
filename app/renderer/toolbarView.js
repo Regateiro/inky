@@ -5,6 +5,128 @@ const { debug, debugTrace } = require("./debug.js");
 
 const ToolbarView = new EventEmitter();
 
+var autocompleteSuggestions = [];
+var autocompleteIndex = -1;
+var $autocompleteList = null;
+
+function getAutocompleteSuggestions() {
+    if (!window.InkProject || !window.InkProject.currentProject) return [];
+    
+    const project = window.InkProject.currentProject;
+    const allFiles = project.files || [];
+    const suggestions = [];
+    
+    allFiles.forEach(inkFile => {
+        if (!inkFile || !inkFile.symbols) return;
+        
+        try {
+            inkFile.symbols.parse();
+        } catch(e) {
+            return;
+        }
+        
+        const ranges = inkFile.symbols.rangeIndex;
+        
+        ranges.forEach(range => {
+            const symbol = range.symbol;
+            suggestions.push(symbol.name);
+            
+            if (symbol.innerSymbols) {
+                Object.keys(symbol.innerSymbols).forEach((innerSymbolName) => {
+                    const innerSymbol = symbol.innerSymbols[innerSymbolName];
+                    if (innerSymbol.flowType.name === "Stitch") {
+                        suggestions.push(`${symbol.name}.${innerSymbolName}`);
+                    }
+                });
+            }
+        });
+    });
+    
+    return suggestions.sort();
+}
+
+function showAutocomplete(filter) {
+    hideAutocomplete();
+    
+    if (!filter || filter.trim().length === 0) return;
+    
+    autocompleteSuggestions = getAutocompleteSuggestions().filter(s => 
+        s.toLowerCase().includes(filter.toLowerCase())
+    );
+    
+    if (autocompleteSuggestions.length === 0) return;
+    
+    autocompleteIndex = 0;
+    
+    $autocompleteList = $('<div class="pathJumpAutocomplete"></div>');
+    
+    autocompleteSuggestions.forEach((suggestion, index) => {
+        const $item = $(`<div class="pathJumpAutocomplete-item">${suggestion}</div>`);
+        if (index === 0) $item.addClass("selected");
+        
+        $item.on("click", function() {
+            $("#toolbar .pathJumpInput").val(suggestion);
+            hideAutocomplete();
+            ToolbarView.emit("jumpToPath", suggestion);
+        });
+        
+        $autocompleteList.append($item);
+    });
+    
+    $(".window").append($autocompleteList);
+    
+    const $input = $("#toolbar .pathJumpInput");
+    const $window = $(".window");
+    const inputOffset = $input.offset();
+    const windowOffset = $window.offset();
+    const inputHeight = $input.outerHeight();
+    
+    $autocompleteList.css({
+        position: "absolute",
+        top: (inputOffset.top - windowOffset.top + inputHeight) + "px",
+        left: (inputOffset.left - windowOffset.left) + "px",
+        width: $input.outerWidth() + "px"
+    });
+}
+
+function hideAutocomplete() {
+    if ($autocompleteList) {
+        $autocompleteList.remove();
+        $autocompleteList = null;
+    }
+    autocompleteSuggestions = [];
+    autocompleteIndex = -1;
+}
+
+function navigateAutocomplete(direction) {
+    if (!$autocompleteList || autocompleteSuggestions.length === 0) return;
+    
+    const $items = $autocompleteList.find(".pathJumpAutocomplete-item");
+    $items.removeClass("selected");
+    
+    if (direction === "up") {
+        autocompleteIndex = (autocompleteIndex - 1 + autocompleteSuggestions.length) % autocompleteSuggestions.length;
+    } else {
+        autocompleteIndex = (autocompleteIndex + 1) % autocompleteSuggestions.length;
+    }
+    
+    $items.eq(autocompleteIndex).addClass("selected");
+    $items.eq(autocompleteIndex)[0].scrollIntoView({ block: "nearest" });
+}
+
+function selectAutocompleteItem() {
+    if (!$autocompleteList || autocompleteIndex < 0) return false;
+    
+    const selected = autocompleteSuggestions[autocompleteIndex];
+    if (selected) {
+        $("#toolbar .pathJumpInput").val(selected);
+        hideAutocomplete();
+        ToolbarView.emit("jumpToPath", selected);
+        return true;
+    }
+    return false;
+}
+
 function updateIssueSummary(issues, issueClickCallback) {
 
     var $message = $(".issuesMessage");
@@ -172,19 +294,42 @@ $(document).ready(function() {
         var pathValue = $("#toolbar .pathJumpInput").val().trim();
         debugTrace("toolbar.pathJumpGo.click", pathValue);
         if( pathValue.length > 0 ) {
+            hideAutocomplete();
             ToolbarView.emit("jumpToPath", pathValue);
         }
         event.preventDefault();
     });
 
-    $("#toolbar .pathJumpInput").on("keyup", function(event) {
-        if( event.keyCode === 13 ) {
-            var pathValue = $(this).val().trim();
-            debugTrace("toolbar.pathJumpInput.enter", pathValue);
-            if( pathValue.length > 0 ) {
-                ToolbarView.emit("jumpToPath", pathValue);
+    $("#toolbar .pathJumpInput").on("input", function(event) {
+        var pathValue = $(this).val().trim();
+        showAutocomplete(pathValue);
+    });
+
+    $("#toolbar .pathJumpInput").on("keydown", function(event) {
+        if( event.key === "ArrowUp" ) {
+            event.preventDefault();
+            navigateAutocomplete("up");
+        } else if( event.key === "ArrowDown" ) {
+            event.preventDefault();
+            navigateAutocomplete("down");
+        } else if( event.key === "Enter" ) {
+            if (selectAutocompleteItem()) {
+                event.preventDefault();
+            } else {
+                var pathValue = $(this).val().trim();
+                debugTrace("toolbar.pathJumpInput.enter", pathValue);
+                if( pathValue.length > 0 ) {
+                    hideAutocomplete();
+                    ToolbarView.emit("jumpToPath", pathValue);
+                }
             }
+        } else if( event.key === "Escape" ) {
+            hideAutocomplete();
         }
+    });
+
+    $("#toolbar .pathJumpInput").on("blur", function() {
+        setTimeout(hideAutocomplete, 200);
     });
 
     

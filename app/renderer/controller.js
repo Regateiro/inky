@@ -30,6 +30,8 @@ const GotoAnything = require("./goto.js").GotoAnything;
 const FindInProject = require("./findInProject.js").FindInProject;
 const i18n = require("./i18n.js");
 
+window.InkProject = InkProject;
+
 if (DEBUG_ENABLED) {
     debug("Debug mode enabled");
 }

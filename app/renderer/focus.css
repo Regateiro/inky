@@ -311,3 +311,18 @@
 .window.focus #toolbar .pathJumpGo:hover {
     background: #444 !important;
 }
+
+.window.focus .pathJumpAutocomplete {
+    background: #1A1A1A;
+    border-color: #666;
+}
+
+.window.focus .pathJumpAutocomplete-item {
+    color: #FFF;
+    border-bottom-color: #444;
+}
+
+.window.focus .pathJumpAutocomplete-item:hover,
+.window.focus .pathJumpAutocomplete-item.selected {
+    background: #333;
+}

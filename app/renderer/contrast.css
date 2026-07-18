@@ -314,3 +314,18 @@
 .window.contrast #toolbar .pathJumpGo:hover {
     background: #444 !important;
 }
+
+.window.contrast .pathJumpAutocomplete {
+    background: #1A1A1A;
+    border-color: #666;
+}
+
+.window.contrast .pathJumpAutocomplete-item {
+    color: #FFF;
+    border-bottom-color: #444;
+}
+
+.window.contrast .pathJumpAutocomplete-item:hover,
+.window.contrast .pathJumpAutocomplete-item.selected {
+    background: #333;
+}
