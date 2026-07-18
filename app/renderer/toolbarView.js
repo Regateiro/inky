@@ -1,13 +1,9 @@
+const EventEmitter = require("events");
 const $ = window.jQuery = require('./jquery-2.2.3.min.js');
 const i18n = require("./i18n.js");
+const { debug, debugTrace } = require("./debug.js");
 
-// Overriden by external setButtonActions call
-var events = {
-    rewind:   () => {},
-    stepBack: () => {},
-    selectIssue: () => {},
-    didSetTitle: () => {}
-};
+const ToolbarView = new EventEmitter();
 
 function updateIssueSummary(issues, issueClickCallback) {
 
@@ -41,7 +37,10 @@ function updateIssueSummary(issues, issueClickCallback) {
             return i1.lineNumber - i2.lineNumber;
     });
 
-    issues.forEach((issue) => {
+    var uniqueFilenames = [...new Set(issues.map(i => i.filename).filter(f => f))];
+    var isMultiFile = uniqueFilenames.length > 1;
+
+    function addIssueRow(issue) {
         var errorClass = "";
         if( issue.type == "ERROR" || issue.type == "RUNTIME ERROR" ) {
             errorCount++;
@@ -65,12 +64,30 @@ function updateIssueSummary(issues, issueClickCallback) {
                           </div>`);
 
         $issueRow.click((e) => {
-            events.selectIssue(issue);
+            ToolbarView.emit("selectIssue", issue);
             e.preventDefault();
         });
 
         $issuesTable.append($issueRow);
-    });
+    }
+
+    if( isMultiFile ) {
+        var issuesByFilename = {};
+        issues.forEach((issue) => {
+            var filename = issue.filename || "";
+            if( !issuesByFilename[filename] )
+                issuesByFilename[filename] = [];
+            issuesByFilename[filename].push(issue);
+        });
+
+        Object.keys(issuesByFilename).forEach((filename) => {
+            var $heading = $(`<div class="row file-heading"><div class="col issue"><b>${filename}</b></div></div>`);
+            $issuesTable.append($heading);
+            issuesByFilename[filename].forEach(addIssueRow);
+        });
+    } else {
+        issues.forEach(addIssueRow);
+    }
 
     if( errorCount == 0 && warningCount == 0 && todoCount == 0 ) {
         $summary.addClass("hidden");
@@ -108,35 +125,66 @@ function updateIssuesPopupPosition() {
 $(document).ready(function() {
 
     $("#toolbar .nav-toggle.button").on("click", function(event) {
-        events.toggleSidebar("#file-nav-wrapper", ".nav-toggle.button");
+        debugTrace("toolbar.nav-toggle.click");
+        ToolbarView.emit("toggleSidebar", "#file-nav-wrapper", ".nav-toggle.button");
         event.preventDefault();
     });
 
     $("#toolbar .knot-toggle.button").on("click", function(event) {
-        events.toggleSidebar("#knot-stitch-wrapper", ".knot-toggle.button");
+        debugTrace("toolbar.knot-toggle.click");
+        ToolbarView.emit("toggleSidebar", "#knot-stitch-wrapper", ".knot-toggle.button");
         event.preventDefault();
     });
 
     $("#toolbar .nav-back.button").on("click", function(event) {
-        events.navigateBack();
+        debugTrace("toolbar.nav-back.click");
+        ToolbarView.emit("navigateBack");
         event.preventDefault();
     });
 
     $("#toolbar .nav-forward.button").on("click", function(event) {
-        events.navigateForward();
+        debugTrace("toolbar.nav-forward.click");
+        ToolbarView.emit("navigateForward");
         event.preventDefault();
     });
 
 
 
     $("#toolbar .rewind.button").on("click", function(event) {
-        events.rewind();
+        debugTrace("toolbar.rewind.click");
+        ToolbarView.emit("rewind");
         event.preventDefault();
     });
 
     $("#toolbar .step-back.button").on("click", function(event) {
-        events.stepBack();
+        debugTrace("toolbar.step-back.click");
+        ToolbarView.emit("stepBack");
         event.preventDefault();
+    });
+
+    $("#toolbar .pause-toggle.button").on("click", function(event) {
+        debugTrace("toolbar.pause-toggle.click");
+        ToolbarView.emit("togglePause");
+        event.preventDefault();
+    });
+
+    $("#toolbar .pathJumpGo").on("click", function(event) {
+        var pathValue = $("#toolbar .pathJumpInput").val().trim();
+        debugTrace("toolbar.pathJumpGo.click", pathValue);
+        if( pathValue.length > 0 ) {
+            ToolbarView.emit("jumpToPath", pathValue);
+        }
+        event.preventDefault();
+    });
+
+    $("#toolbar .pathJumpInput").on("keyup", function(event) {
+        if( event.keyCode === 13 ) {
+            var pathValue = $(this).val().trim();
+            debugTrace("toolbar.pathJumpInput.enter", pathValue);
+            if( pathValue.length > 0 ) {
+                ToolbarView.emit("jumpToPath", pathValue);
+            }
+        }
     });
 
     
@@ -158,17 +206,35 @@ $(document).ready(function() {
 
 function setTitle(title) {
     $("h1.title").text(title);
-    events.didSetTitle(title);
+    ToolbarView.emit("didSetTitle", title);
 }
 
 function setBusySpinnerVisible(vis) {
-    $(".busySpinner").css("display", vis ? "block" : "none");
+    if (vis) {
+        $(".busySpinner").addClass("visible");
+    } else {
+        $(".busySpinner").removeClass("visible");
+    }
 }
 
-exports.ToolbarView = {
-    setEvents: (e) => { events = e; },
+exports.ToolbarView = Object.assign(ToolbarView, {
     updateIssueSummary: updateIssueSummary,
     clearIssueSummary: () => { updateIssueSummary([]); },
     setTitle: setTitle,
-    setBusySpinnerVisible: setBusySpinnerVisible
-}
+    setBusySpinnerVisible: setBusySpinnerVisible,
+    setPauseActive: (active) => {
+        debugTrace("toolbarView.setPauseActive", active);
+        var $btn = $("#toolbar .pause-toggle.button");
+        var $icon = $btn.find(".icon");
+        if( active ) {
+            $btn.addClass("selected");
+            $icon.removeClass("icon-pause").addClass("icon-play");
+            $btn.attr("title", "Resume compilation");
+        } else {
+            $btn.removeClass("selected");
+            $icon.removeClass("icon-play").addClass("icon-pause");
+            $btn.attr("title", "Pause compilation");
+        }
+        debug("toolbarView.setPauseActive: button state updated, classes:", $btn.attr("class"));
+    }
+})

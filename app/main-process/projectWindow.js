@@ -34,10 +34,9 @@ const recentFilesPath = path.join(electron.app.getPath("userData"), "recent-file
 const viewSettingsPath = path.join(electron.app.getPath("userData"), "view-settings.json");
 
 
-// Overriden by main.js
-var events = {
+// Global event handlers (set by main.js)
+var globalEventHandlers = {
     onRecentFilesChanged:    (files) => {},
-    onProjectSettingsChanged: (settings) => {},
     onViewSettingsChanged:   (settings) => {}
 };
 
@@ -58,6 +57,19 @@ function ProjectWindow(filePath) {
 
     this.safeToClose = false;
     this.mainInkAbsPath = filePath;
+    this.projectState = {
+        hasUnsavedChanges: false,
+        isReady: false,
+        hasProject: false,
+        hasActiveFile: false,
+        activeFileIsMainInk: true,
+    };
+
+    // Per-window event handlers
+    this.eventHandlers = {
+        onProjectSettingsChanged: (settings) => {},
+        onProjectStateFocused: (win) => {}
+    };
 
     // Existing project at specific path
     if( filePath ) {
@@ -73,8 +85,7 @@ function ProjectWindow(filePath) {
     // New project, new settings
     else {
         this.settings = {};
-        if( events.onProjectSettingsChanged )
-            events.onProjectSettingsChanged({});
+        this.notifySettingsChanged();
     }
 
     windows.push(this);
@@ -105,13 +116,36 @@ function ProjectWindow(filePath) {
     // Project settings may affect menus etc, so we refresh that
     // when changing focus between different windows
     this.browserWindow.on("focus", () => {
-        if( events.onProjectSettingsChanged )
-            events.onProjectSettingsChanged(this.settings);
+        this.notifySettingsChanged();
+        this.notifyStateFocused();
     });
+
+    this.browserWindow.on("blur", () => {
+        // No action needed - main.js handles blur globally
+    });
+}
+
+// Per-window notification methods
+ProjectWindow.prototype.notifySettingsChanged = function() {
+    if( this.eventHandlers.onProjectSettingsChanged )
+        this.eventHandlers.onProjectSettingsChanged(this.settings);
+}
+
+ProjectWindow.prototype.notifyStateFocused = function() {
+    if( this.eventHandlers.onProjectStateFocused )
+        this.eventHandlers.onProjectStateFocused(this);
 }
 
 ProjectWindow.prototype.newInclude = function() {
     this.browserWindow.webContents.send('project-new-include');
+}
+
+ProjectWindow.prototype.renameFile = function() {
+    this.browserWindow.webContents.send('project-rename-file');
+}
+
+ProjectWindow.prototype.deleteFile = function() {
+    this.browserWindow.webContents.send('project-delete-file');
 }
 
 ProjectWindow.prototype.save = function() {
@@ -152,6 +186,12 @@ ProjectWindow.prototype.openDevTools = function() {
     this.browserWindow.webContents.openDevTools();
 }
 
+ProjectWindow.prototype.switchToFile = function(absFilePath) {
+    if (!this.mainInkAbsPath) return false;
+    this.browserWindow.webContents.send('open-ink-file-by-path', absFilePath);
+    return true;
+}
+
 ProjectWindow.prototype.zoom = function(amount) {
     this.browserWindow.webContents.send('zoom', amount);
 }
@@ -171,9 +211,8 @@ ProjectWindow.prototype.refreshProjectSettings = function(rootInkFilePath) {
 
 
     function completeSettings(settings, err) {
-        if( events.onProjectSettingsChanged ) {
-            events.onProjectSettingsChanged(settings);
-        }
+        self.settings = settings;
+        self.notifySettingsChanged();
 
         self.browserWindow.send("project-settings-changed", self.settings);
 
@@ -184,7 +223,7 @@ ProjectWindow.prototype.refreshProjectSettings = function(rootInkFilePath) {
 
     fs.stat(settingsPath, (err, stats) => {
         if( err || !stats.isFile() ) { 
-            events.onProjectSettingsChanged({});
+            completeSettings({});
             return;
         }
 
@@ -207,8 +246,6 @@ ProjectWindow.prototype.refreshProjectSettings = function(rootInkFilePath) {
                 return;
             }
 
-            self.settings = settings;
-
             completeSettings(settings);
         });
 
@@ -218,8 +255,14 @@ ProjectWindow.prototype.refreshProjectSettings = function(rootInkFilePath) {
 
 ProjectWindow.all = () => windows;
 
-ProjectWindow.setEvents = function(newEvents) {
-    events = newEvents
+ProjectWindow.setGlobalEventHandlers = function(handlers) {
+    globalEventHandlers = { ...globalEventHandlers, ...handlers };
+}
+
+ProjectWindow.setPerWindowEventHandlers = function(win, handlers) {
+    if( win ) {
+        win.eventHandlers = { ...win.eventHandlers, ...handlers };
+    }
 }
 
 
@@ -288,8 +331,8 @@ function addRecentFile(filePath) {
         encoding: "utf-8"
     });
 
-    if( events.onRecentFilesChanged ) {
-        events.onRecentFilesChanged(newRecentFiles);
+    if( globalEventHandlers.onRecentFilesChanged ) {
+        globalEventHandlers.onRecentFilesChanged(newRecentFiles);
     }
 }
 
@@ -306,10 +349,14 @@ ProjectWindow.open = function(filePath) {
             filePath = multiSelectPaths[0];
     }
 
-    // TODO: Could check whether the filepath is relative to any of our
-    // existing open projects, and switch to that window?
-    console.log("Testing!")
     if( filePath) {
+        const resolvedPath = path.resolve(filePath);
+        const existingWin = ProjectWindow.withMainkInkPath(resolvedPath);
+        if( existingWin ) {
+            existingWin.browserWindow.focus();
+            return existingWin;
+        }
+
         addRecentFile(filePath);
         return new ProjectWindow(filePath);
     }
@@ -346,8 +393,8 @@ ProjectWindow.addOrChangeViewSetting = function(name, data){
     fs.writeFileSync(viewSettingsPath, JSON.stringify(viewSettings), {
         encoding: "utf-8"
     });
-    if(events.onViewSettingsChanged) {
-        events.onViewSettingsChanged(viewSettings);
+    if(globalEventHandlers.onViewSettingsChanged) {
+        globalEventHandlers.onViewSettingsChanged(viewSettings);
     }
 }
 
@@ -373,6 +420,13 @@ ipc.on("project-settings-needs-reload", (event, rootInkFilePath) => {
 ipc.on("set-native-window-title", (event, newWindowTitle) => {
     var win = ProjectWindow.withWebContents(event.sender);
     win.browserWindow.title = newWindowTitle;
+});
+
+ipc.on("project-state-changed", (event, state) => {
+    var win = ProjectWindow.withWebContents(event.sender);
+    if( win ) {
+        win.projectState = state;
+    }
 });
 
 exports.ProjectWindow = ProjectWindow;

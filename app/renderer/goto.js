@@ -1,3 +1,4 @@
+const EventEmitter = require("events");
 const path = require("path");
 const electron = require("electron");
 const ipc = electron.ipcRenderer;
@@ -27,11 +28,9 @@ var cachedLineGroups = null;
 const linesPerGroup = 20000;
 
 var resultsBuildInterval = null;
+var lastRenderedCategory = null;
 
-var events = {
-    gotoFile: () => {},
-    lookupRuntimePath: () => {}
-};
+const GotoAnything = new EventEmitter();
 
 function show() {
 
@@ -69,7 +68,7 @@ function show() {
         if( file == InkProject.currentProject.activeInkFile ) {
             collectSymbols(activeFileSymbols, fileSymbols, true);
         } else {
-            collectSymbols(allSymbols, fileSymbols, false);
+            collectSymbols(allSymbols, fileSymbols, true);
         }
     }
     cachedSymbols = allSymbols;
@@ -170,6 +169,8 @@ function refresh() {
 
     $results.scrollTop(0);
 
+    lastRenderedCategory = null;
+
     var results = [];
 
     var lineNumMatch = searchStr.match(/^\s*(\d+)\s*$/);
@@ -186,7 +187,7 @@ function refresh() {
     var runtimePathMatch = searchStr.match(/^(?:(?:[\w-]+)\.)+[\w-]+$/);
     if( runtimePathMatch ) {
         var path = runtimePathMatch[0];
-        events.lookupRuntimePath(path, result => {
+        GotoAnything.emit("lookupRuntimePath", path, result => {
             if( result && result.filename && result.lineNumber ) {
                 var lineNum = result.lineNumber;
                 var file = InkProject.currentProject.inkFileWithRelativePath(result.filename);
@@ -252,6 +253,15 @@ function refresh() {
 
 function addResult(result, searchStr)
 {
+    var type = resultType(result);
+    var category = resultCategory(type);
+
+    if( category && category !== lastRenderedCategory ) {
+        lastRenderedCategory = category;
+        var $header = $(`<li class='category-header'>${i18n._(categoryLabel(category))}</li>`);
+        $results.append($header);
+    }
+
     var resultContent = result.name || result.line;
 
     var wrappedResult = wrap(resultContent, searchStr, { wrap: {
@@ -260,13 +270,12 @@ function addResult(result, searchStr)
     }});
 
 
-    var type = resultType(result);
     var $result;
 
     if( type == "file" ) {
         var dirStr = "";
         var file = result.file;
-        var dirName = path.dirname(file.relativePath());
+        var dirName = path.dirname(file.relPath);
         if( dirName != "." )
             dirStr = `<span class='ancestor'>${dirName}/</span>`;
         $result = $(`<li class='file'>📄 ${dirStr}${wrappedResult}</li>`);
@@ -290,13 +299,13 @@ function addResult(result, searchStr)
         if( ancestorStr )
             ancestorStr = `<span class='ancestor'>${ancestorStr}</span>`;
 
-        var filePath = result.inkFile.relativePath();
+        var filePath = result.inkFile.relPath;
         var lineNo = result.row+1;
         $result = $(`<li class='symbol'><p>✎ ${ancestorStr}${wrappedResult}</p><p class='meta'>${filePath} - ${i18n._("line")} ${lineNo}</p></li>`);
     }
 
     else if( type == "content" ) {
-        var filePath = result.file.relativePath();
+        var filePath = result.file.relPath;
         var lineNo = result.row+1;
         $result = $(`<li class='content'><p>${wrappedResult}</p><p class='meta'>${filePath} - ${i18n._("line")} ${lineNo}</p></li>`);
     }
@@ -348,6 +357,28 @@ function resultType(result)
     return null;
 }
 
+function resultCategory(type)
+{
+    if( type == "file" )
+        return "files";
+    if( type == "symbol" )
+        return "symbols";
+    if( type == "content" || type == "gotoLine" )
+        return "lines";
+    return null;
+}
+
+function categoryLabel(category)
+{
+    if( category == "files" )
+        return "Files";
+    if( category == "symbols" )
+        return "Symbols";
+    if( category == "lines" )
+        return "Lines";
+    return null;
+}
+
 function choose($result)
 {
     var result = $result.data().result;
@@ -355,19 +386,19 @@ function choose($result)
 
     // Text content of line result
     if( type == "content" )
-        events.gotoFile(result.file, result.row);
+        GotoAnything.emit("gotoFile", result.file, result.row);
 
     // Go to line number / runtime path
     else if( type == "gotoLine" || type == "runtimePath" )
-        events.gotoFile(result.file, result.line);
+        GotoAnything.emit("gotoFile", result.file, result.line);
 
     // File name
     if( type == "file" )
-        events.gotoFile(result.file);
+        GotoAnything.emit("gotoFile", result.file);
 
     // Symbol
     else if( type == "symbol" )
-        events.gotoFile(result.inkFile, result.row);
+        GotoAnything.emit("gotoFile", result.inkFile, result.row);
 
     // done!
     hide({restoreCursor: false});
@@ -463,6 +494,4 @@ ipc.on("goto-anything", (event) => {
     toggle();
 });
 
-exports.GotoAnything = {
-    setEvents: e => events = e,
-}
+exports.GotoAnything = GotoAnything;

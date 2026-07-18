@@ -59,6 +59,17 @@
         <div class="buttons right">
           <div class="busySpinner"></div>
 
+          <div class="pathJump">
+            <input type="text" class="pathJumpInput" placeholder="Jump to path..."></input>
+            <div class="button pathJumpGo i18n" title="Jump to path">
+              <span>Go</span>
+            </div>
+          </div>
+
+          <div class="button pause-toggle i18n" title="Toggle pause compilation">
+            <span class="icon icon-pause"></span>
+          </div>
+
           <div class="button step-back i18n" title="Rewind a single choice">
             <span class="icon icon-reply"></span>
           </div>
@@ -126,6 +137,15 @@
                 </tbody>
               </table>
 
+              <div class="variableQueryPanel hidden">
+                <div class="variableQueryRow">
+                  <input type="text" class="variableQueryInput" placeholder="Query variable..."></input>
+                  <div class="variableQueryBtn" title="Query variable">Query</div>
+                  <div class="variableListBtn" title="List all variables">List All</div>
+                </div>
+                <div class="variableQueryResult hidden"></div>
+              </div>
+
               <div class="scrollContainer">
                 <div class="innerText active">
                 </div>
@@ -145,6 +165,40 @@
           <input class="i18n" placeholder="File name, stitch, knot, line number, or text"></input>
           <ul class="results">
           </ul>
+        </div>
+      </div>
+
+      <div id="find-in-project-container" class="hidden">
+        <div id="find-in-project" class="hidden">
+          <div class="fip-header">
+            <span class="fip-title">Find in Project</span>
+            <span class="fip-close icon-cancel"></span>
+          </div>
+          <div class="fip-search-row">
+            <input type="text" class="fip-search-input" placeholder="Search...">
+            <label><input type="checkbox" id="fip-case-sensitive"> Aa</label>
+            <label><input type="checkbox" id="fip-whole-word"> Ab</label>
+            <label><input type="checkbox" id="fip-regex"> .*</label>
+          </div>
+          <div class="fip-replace-row">
+            <input type="text" class="fip-replace-input" placeholder="Replace...">
+            <button class="fip-replace-btn btn btn-default">Replace</button>
+            <button class="fip-replace-all-btn btn btn-default">Replace All</button>
+          </div>
+          <div class="fip-match-count"></div>
+          <ul class="fip-results"></ul>
+        </div>
+      </div>
+
+      <div id="save-dialog-overlay" class="hidden">
+        <div class="save-dialog">
+          <p class="save-dialog-message i18n">Would you like to save changes before exiting?</p>
+          <p class="save-dialog-detail i18n">Your changes will be lost if you don't save.</p>
+          <div class="save-dialog-buttons">
+            <button class="btn btn-default save-dialog-cancel i18n">Cancel</button>
+            <button class="btn btn-default save-dialog-dont-save i18n">Don't save</button>
+            <button class="btn btn-primary save-dialog-save i18n">Save</button>
+          </div>
         </div>
       </div>
 

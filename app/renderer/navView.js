@@ -1,9 +1,12 @@
+const EventEmitter = require("events");
 const $ = window.jQuery = require('./jquery-2.2.3.min.js');
 const path = require("path");
 const _ = require("lodash");
 const i18n = require("./i18n.js");
 const InkFile = require("./inkFile.js").InkFile;
 const { range, toInteger } = require('lodash');
+const {ipcRenderer} = require("electron");
+const { debug, debugTrace, debugError } = require("./debug.js");
 
 const slideAnimDuration = 200;
 var sidebarWidth = 200;
@@ -19,7 +22,8 @@ var $currentNavWrapper = null
 
 var visible = false;
 var hasBeenShown = false;
-var events = {};
+
+const NavView = new EventEmitter();
 
 $(document).ready(() => {
     //Assign each variable to the allocated class/id.
@@ -34,21 +38,180 @@ $(document).ready(() => {
 
     // Clicking on navigation item
     $fileNavWrapper.on("click", ".nav-group-item", function(event) {
-        // Any clicked navigation item should become highlighted
         event.preventDefault();
         var $targetNavGroupItem = $(event.currentTarget);
         highlight$NavGroupItem($targetNavGroupItem);
 
         var fileIdStr = $targetNavGroupItem.attr("data-file-id");
+        debugTrace("navView.click", "fileIdStr:", fileIdStr);
+        if( fileIdStr === undefined || fileIdStr === "" ) {
+            debugError("navView.click: no data-file-id attribute");
+            return;
+        }
         var fileId = parseInt(fileIdStr);
-        events.clickFileId(fileId);
+        if( isNaN(fileId) ) {
+            debugError("navView.click: fileId is NaN:", fileIdStr);
+            return;
+        }
+        debug("navView.click: emitting clickFileId", fileId);
+        NavView.emit("clickFileId", fileId);
     });
     $knotStichNavWrapper.on("click", ".nav-group-item", function(event) {
         // Any clicked navigation item should become highlighted
         event.preventDefault();
         var $targetNavGroupItem = $(event.currentTarget);
         var row = $targetNavGroupItem.attr("row");
-        events.jumpToRow(parseInt(row))
+        debugTrace("navView.knotStitch.click", "row:", row);
+        NavView.emit("jumpToRow", parseInt(row))
+    });
+
+    // Context menu for file nav items
+    $fileNavWrapper.on("contextmenu", ".nav-group-item", function(event) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        var $targetNavGroupItem = $(event.currentTarget);
+        highlight$NavGroupItem($targetNavGroupItem);
+
+        var fileIdStr = $targetNavGroupItem.attr("data-file-id");
+        if( !fileIdStr ) return;
+        var fileId = parseInt(fileIdStr);
+
+        removeContextMenu();
+        NavView.emit("clickFileId", fileId);
+
+        var $menu = $(`
+            <div class="nav-context-menu" style="position:fixed;left:${event.clientX}px;top:${event.clientY}px;z-index:9999;background:#fff;border:1px solid #ccc;border-radius:4px;box-shadow:0 2px 8px rgba(0,0,0,0.15);padding:4px 0;font-size:13px;min-width:120px;">
+                <div class="nav-context-menu-item" data-action="rename" style="padding:6px 16px;cursor:pointer;">Rename</div>
+                <div class="nav-context-menu-item" data-action="delete" style="padding:6px 16px;cursor:pointer;">Delete</div>
+            </div>
+        `);
+        $("body").append($menu);
+
+        $menu.on("click", ".nav-context-menu-item", function(e) {
+            e.stopPropagation();
+            var action = $(this).data("action");
+            removeContextMenu();
+            if( action === "rename" ) {
+                NavView.emit("renameFileId", fileId);
+            } else if( action === "delete" ) {
+                NavView.emit("deleteFileId", fileId);
+            }
+        });
+
+        $(document).one("click", function() {
+            removeContextMenu();
+        });
+    });
+
+    // Mac-style return-to-rename: pressing Return on a selected file starts rename
+    $(document).on("keydown", function(e) {
+        if( e.key === "F2" || (e.key === "Enter" && !$(e.target).is("#toolbar .pathJumpInput") && $fileNavWrapper.find(".nav-group-item.active").length > 0) ) {
+            var $active = $fileNavWrapper.find(".nav-group-item.active");
+            if( $active.length > 0 ) {
+                var fileIdStr = $active.attr("data-file-id");
+                if( fileIdStr ) {
+                    e.preventDefault();
+                    NavView.emit("renameFileId", parseInt(fileIdStr));
+                }
+            }
+        }
+    });
+
+    ipcRenderer.on("project-rename-file", () => {
+        var $active = $fileNavWrapper.find(".nav-group-item.active");
+        if( $active.length > 0 ) {
+            var fileIdStr = $active.attr("data-file-id");
+            if( fileIdStr ) {
+                NavView.emit("renameFileId", parseInt(fileIdStr));
+            }
+        }
+    });
+
+    ipcRenderer.on("project-delete-file", () => {
+        var $active = $fileNavWrapper.find(".nav-group-item.active");
+        if( $active.length > 0 ) {
+            var fileIdStr = $active.attr("data-file-id");
+            if( fileIdStr ) {
+                NavView.emit("deleteFileId", parseInt(fileIdStr));
+            }
+        }
+    });
+
+    var $dragOverTarget = null;
+    var draggedFileId = null;
+
+    $fileNavWrapper.on("dragstart", ".nav-group-item[draggable]", function(e) {
+        var fileId = parseInt($(this).attr("data-file-id"));
+        draggedFileId = fileId;
+        e.originalEvent.dataTransfer.effectAllowed = "move";
+        e.originalEvent.dataTransfer.setData("text/plain", String(fileId));
+        $(this).css("opacity", "0.4");
+    });
+
+    $fileNavWrapper.on("dragend", ".nav-group-item[draggable]", function() {
+        $(this).css("opacity", "");
+        if( $dragOverTarget ) {
+            $dragOverTarget.removeClass("drag-over");
+            $dragOverTarget = null;
+        }
+        draggedFileId = null;
+    });
+
+    $fileNavWrapper.on("dragover", ".nav-group-item, .nav-group-title", function(e) {
+        e.preventDefault();
+        e.originalEvent.dataTransfer.dropEffect = "move";
+
+        var $target = $(this).closest(".nav-group-item, .nav-group-title");
+        if( $dragOverTarget && !$dragOverTarget.is($target) ) {
+            $dragOverTarget.removeClass("drag-over");
+            $dragOverTarget = null;
+        }
+        if( !$target.hasClass("drag-over") ) {
+            $target.addClass("drag-over");
+            $dragOverTarget = $target;
+        }
+    });
+
+    $fileNavWrapper.on("dragleave", ".nav-group-item, .nav-group-title", function(e) {
+        var $target = $(this).closest(".nav-group-item, .nav-group-title");
+        var related = e.relatedTarget;
+        if( related && $target.has(related).length > 0 ) return;
+        if( $dragOverTarget && $dragOverTarget.is($target) ) {
+            $dragOverTarget.removeClass("drag-over");
+            $dragOverTarget = null;
+        }
+    });
+
+    $fileNavWrapper.on("drop", ".nav-group-item, .nav-group-title", function(e) {
+        e.preventDefault();
+        if( $dragOverTarget ) {
+            $dragOverTarget.removeClass("drag-over");
+            $dragOverTarget = null;
+        }
+
+        if( draggedFileId === null ) return;
+
+        var $target = $(e.currentTarget);
+        var $navGroupItem = $target.closest(".nav-group-item");
+        var $navGroup = $target.closest(".nav-group");
+
+        if( $navGroupItem.length > 0 ) {
+            var targetFileId = parseInt($navGroupItem.attr("data-file-id"));
+            if( targetFileId !== draggedFileId ) {
+                NavView.emit("moveInclude", draggedFileId, targetFileId);
+            }
+        } else if( $navGroup.length > 0 ) {
+            var groupType = $navGroup.attr("data-group-type");
+            if( groupType === "unused" ) {
+                NavView.emit("moveInclude", draggedFileId, null);
+            } else if( groupType === "includes" ) {
+                var mainInkId = $navGroup.siblings(".main-ink").find(".nav-group-item").attr("data-file-id");
+                if( mainInkId !== undefined ) {
+                    NavView.emit("moveInclude", draggedFileId, parseInt(mainInkId));
+                }
+            }
+        }
     });
 
     // Add new include interactions
@@ -73,8 +236,9 @@ $(document).ready(() => {
         } else {
             
             var shouldAddToMainInk = $addToMainInkCheckbox.get(0).checked;
-            var success = events.addInclude(confirmedFilename, shouldAddToMainInk);
-            if( success ) setIncludeFormVisible(false);
+            NavView.emit("addInclude", confirmedFilename, shouldAddToMainInk, (success) => {
+                if( success ) setIncludeFormVisible(false);
+            });
         }
     }
 
@@ -110,17 +274,69 @@ $(document).ready(() => {
     });
 });
 
+function removeContextMenu() {
+    $(".nav-context-menu").remove();
+}
+
+function startRenameFile(fileId) {
+    var $item = $fileNavWrapper.find(`.nav-group-item[data-file-id="${fileId}"]`);
+    if( $item.length === 0 ) return;
+
+    var $filename = $item.find(".filename");
+    var currentName = $filename.text();
+    var $input = $(`<input type="text" class="rename-input" value="${currentName}" style="background:#fff;border:1px solid #4a90d9;border-radius:2px;padding:1px 3px;font-size:inherit;color:inherit;width:${currentName.length * 7 + 20}px;outline:none;">`);
+
+    $filename.hide();
+    $item.append($input);
+    $input.focus();
+    $input[0].select();
+
+    var committed = false;
+    function commit() {
+        if( committed ) return;
+        committed = true;
+        var newName = $input.val().trim();
+        $input.remove();
+        $filename.show();
+        if( newName && newName !== currentName ) {
+            NavView.emit("renameFileConfirmed", fileId, newName);
+        }
+    }
+
+    $input.on("blur", commit);
+    $input.on("keydown", function(e) {
+        if( e.key === "Enter" ) {
+            e.preventDefault();
+            commit();
+        } else if( e.key === "Escape" ) {
+            committed = true;
+            $input.remove();
+            $filename.show();
+        }
+    });
+}
+
 function setMainInkFilename(name) {
     $fileNavWrapper.find(".nav-group.main-ink .nav-group-item .filename").text(name);
 }
 
+var _setKnotsTimer = null;
+function setKnotsDebounced(mainInk) {
+    if( _setKnotsTimer ) clearTimeout(_setKnotsTimer);
+    _setKnotsTimer = setTimeout(() => {
+        _setKnotsTimer = null;
+        setKnots(mainInk);
+    }, 200);
+}
+
 function setKnots(mainInk){
-//Parse the symbols before setting the knots
-//TODO: Improved implementation of symbols/when they parse
-//may make this unneeded. This may improve performance, 
-//as currently it parses whenever the user types
-//anything! 
-    mainInk.symbols.parse();
+    debugTrace("navView.setKnots", mainInk.filename());
+    try {
+        mainInk.symbols.parse();
+    } catch(e) {
+        debugError("navView.setKnots: parse failed:", e);
+        return;
+    }
     var ranges = mainInk.symbols.rangeIndex;
 
     $knotStichNavWrapper.empty();
@@ -232,64 +448,117 @@ function updateCurrentKnot(mainInk, cursorPos){
     }
 }
 
-function setFiles(mainInk, allFiles) {
-    var unusedFiles = _.filter(allFiles, f => f.isSpare);
-    var normalIncludes = _.filter(allFiles, f => !f.isSpare && f != mainInk);
-    var groupedIncludes = _.groupBy(normalIncludes, f => { 
-        var dirName = path.dirname(f.relativePath());
-        if( dirName == "." )
-            dirName = "";
-        return dirName;
+var errorFilePaths = new Set();
+
+function setErrorFiles(filePaths) {
+    errorFilePaths = new Set(filePaths);
+    $fileNavWrapper.find(".nav-group-item").each(function() {
+        var $item = $(this);
+        var filePath = $item.data("file-path");
+        if( errorFilePaths.has(filePath) )
+            $item.addClass("has-errors");
+        else
+            $item.removeClass("has-errors");
     });
+}
 
-    var groupsArray = _.map(groupedIncludes, (group, name) => { return {name: name, files: group}; });
-    groupsArray.sort((a,b) => a.name.localeCompare(b.name));
+function buildFileItemHtml(file, depth) {
+    var name = file.isSpare ? file.relPath : file.filename();
+    var extraClass = "";
+    if( file.hasUnsavedChanges ) extraClass = "unsaved";
+    if( file.isLoading ) extraClass += " loading";
+    if( errorFilePaths.has(file.relPath) ) extraClass += " has-errors";
 
-    if( unusedFiles.length > 0 )
-        groupsArray.push({
-            name: i18n._("Unused files"),
-            files: unusedFiles
+    var indent = depth > 0 ? ` style="padding-left:${depth * 16}px"` : "";
+    var icon = depth > 0 ? "icon-folder" : "icon-doc-text";
+
+    var isMainInkItem = depth === 0 && file.isMain();
+    var dragAttrs = isMainInkItem ? "" : `draggable="true" data-file-id="${file.id}"`;
+
+    return `<span class="nav-group-item ${extraClass}" data-file-path="${file.relPath}" ${dragAttrs}${indent}>
+        <span class="icon ${icon}"></span>
+        <span class="filename">${name}</span>
+    </span>`;
+}
+
+function buildTreeNodes(file, hierarchy, visited) {
+    var children = hierarchy[file.id] || [];
+    var nodes = [];
+    children.forEach(child => {
+        if( visited.has(child.id) ) return;
+        visited.add(child.id);
+        nodes.push({
+            file: child,
+            children: buildTreeNodes(child, hierarchy, visited)
         });
+    });
+    return nodes;
+}
+
+function renderTreeNode(node, depth) {
+    var html = buildFileItemHtml(node.file, depth);
+    node.children.forEach(child => {
+        html += renderTreeNode(child, depth + 1);
+    });
+    return html;
+}
+
+function setFiles(mainInk, allFiles, hierarchy) {
+    debugTrace("navView.setFiles", "mainInk:", mainInk.filename(), "allFiles:", allFiles.length);
+    hierarchy = hierarchy || {};
+
+    var unusedFiles = _.filter(allFiles, f => f.isSpare);
 
     $fileNavWrapper.empty();
-    
+
     var extraClass = "";
     if( mainInk.hasUnsavedChanges ) extraClass = "unsaved";
     if( mainInk.isLoading ) extraClass += " loading";
+    if( errorFilePaths.has(mainInk.relPath) ) extraClass += " has-errors";
 
     var $main = `<nav class="nav-group main-ink">
                     <h5 class="nav-group-title">Main ink file</h5>
-                    <a class="nav-group-item ${extraClass}" data-file-id="${mainInk.id}">
+                    <a class="nav-group-item ${extraClass}" data-file-id="${mainInk.id}" data-file-path="${mainInk.relPath}">
                         <span class="icon icon-book"></span>
                         <span class="filename">${mainInk.filename()}</span>
                     </a>
                 </nav>`;
     $fileNavWrapper.append($main);
-    var nonMainFileActive = false;
-    groupsArray.forEach(group => {
-        var items = "";
 
-        group.files.forEach((file) => {
-            var name = file.isSpare ? file.relativePath() : file.filename();
-            
-            var extraClass = "";
-            if( file.hasUnsavedChanges ) extraClass = "unsaved";
-            if( file.isLoading ) extraClass += " loading";
-            
-            items = items + `<span class="nav-group-item ${extraClass}" data-file-id="${file.id}">
-            <span class="icon icon-doc-text"></span>
-            <span class="filename">${name}</span>
-            </span>`;
+    var visited = new Set();
+    visited.add(mainInk.id);
+    var treeNodes = buildTreeNodes(mainInk, hierarchy, visited);
+
+    if( treeNodes.length > 0 ) {
+        var treeHtml = "";
+        treeNodes.forEach(node => {
+            treeHtml += renderTreeNode(node, 0);
         });
+        var $tree = $(`<nav class="nav-group includes-tree" data-group-type="includes"><h5 class="nav-group-title">${i18n._("Includes")}</h5>${treeHtml}</nav>`);
+        $fileNavWrapper.append($tree);
+    }
 
-        extraClass = "";
-        if( group.files === unusedFiles )
-            extraClass = "unused";
+    if( unusedFiles.length > 0 ) {
+        var items = "";
+        unusedFiles.forEach(file => {
+            items += buildFileItemHtml(file, 0);
+        });
+        var $unused = $(`<nav class="nav-group unused" data-group-type="unused"><h5 class="nav-group-title">${i18n._("Unused files")}</h5>${items}</nav>`);
+        $fileNavWrapper.append($unused);
+    }
+}
 
-        var $group = $(`<nav class="nav-group ${extraClass}"><h5 class="nav-group-title">${group.name}</h5> ${items} </nav>`);
-        $fileNavWrapper.append($group);
+function refreshFileStates(allFiles) {
+    allFiles.forEach(function(file) {
+        var $item = $fileNavWrapper.find(`.nav-group-item[data-file-id="${file.id}"]`);
+        if( $item.length === 0 )
+            $item = $fileNavWrapper.find(`.nav-group-item[data-file-path="${file.relPath}"]`);
+        if( $item.length === 0 ) return;
+
+        $item.toggleClass("unsaved", !!file.hasUnsavedChanges);
+        $item.toggleClass("loading", !!file.isLoading);
+        $item.toggleClass("has-errors", errorFilePaths.has(file.relPath));
     });
-    
 }
 
 function highlight$NavGroupItem($navGroupItem) {
@@ -298,18 +567,12 @@ function highlight$NavGroupItem($navGroupItem) {
 }
 
 function highlightRelativePath(relativePath) {
-    var dirName = path.dirname(relativePath);
-    if( dirName == "." )
-        dirName = "";
-
-    var filename = path.basename(relativePath);
-
-    var $group = $fileNavWrapper.find(".nav-group").filter((i, el) => $(el).find(".nav-group-title").text() == dirName);
-    if( dirName == "" ) $group = $group.add(".nav-group.main-ink");
-
-    var $file = $group.find(".nav-group-item .filename").filter((i, el) => $(el).text() == filename);
-    var $navGroupItem = $file.closest(".nav-group-item");
-    highlight$NavGroupItem($navGroupItem);
+    debugTrace("navView.highlightRelativePath", relativePath);
+    var $item = $fileNavWrapper.find(`.nav-group-item[data-file-path="${relativePath}"]`);
+    if( $item.length > 0 )
+        highlight$NavGroupItem($item);
+    else
+        debugError("navView.highlightRelativePath: item not found for", relativePath);
 }
 
 function hideSidebar() {
@@ -394,6 +657,7 @@ function setIncludeFormVisible(visible) {
 }
 
 function toggle(id, buttonId){
+    debugTrace("navView.toggle", id, buttonId);
 
     var $button = $("#toolbar " + buttonId);
     var $thisPanel = $(id);
@@ -436,19 +700,23 @@ function getExternals(file) {
     return file.symbols.getCachedExternals();
 }
 
-exports.NavView = {
+exports.NavView = Object.assign(NavView, {
     setMainInkFilename: setMainInkFilename,
     setFiles: setFiles,
+    refreshFileStates: refreshFileStates,
+    setErrorFiles: setErrorFiles,
     setKnots: setKnots,
+    setKnotsDebounced: setKnotsDebounced,
     updateCurrentKnot: updateCurrentKnot,
     highlightRelativePath: highlightRelativePath,
-    setEvents: e => events = e,
     hide: hideSidebar,
     show: showSidebar,
     initialShow: () => { if( !hasBeenShown ) 
         toggle("#file-nav-wrapper");
     },
     toggle: toggle,
-    showAddIncludeForm: () => setIncludeFormVisible(true)
-}
+    showAddIncludeForm: () => setIncludeFormVisible(true),
+    startRenameFile: startRenameFile,
+    removeContextMenu: removeContextMenu
+})
 

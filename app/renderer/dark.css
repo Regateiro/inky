@@ -1,8 +1,11 @@
 .window.dark #main,
 .window.dark #editor,
-.window.dark #editor .ace_gutter-layer,
-.window.dark .split {
+.window.dark #editor .ace_gutter-layer {
     background-color: #282828;
+}
+
+.window.dark .split {
+    background-color: #444;
 }
 
 .window.dark #toolbar {
@@ -44,6 +47,10 @@
 
 .window.dark #toolbar .button.selected .icon {
     color: #CCC;
+}
+
+.window.dark #toolbar .button.pause-toggle.selected .icon {
+    color: #e74c3c;
 }
 
 /* e.g. filename input */
@@ -168,4 +175,161 @@
 
 .window.dark .sidebar .nav-wrapper::-webkit-scrollbar-thumb {
     background: #323232;
+}
+
+.window.dark #player .turnStepBack {
+    background: #282828;
+    border-color: #444;
+}
+
+.window.dark #player .turnStepBack:hover {
+    background: #333;
+}
+
+.window.dark #player .turnStepBack .icon {
+    color: #888;
+}
+
+.window.dark #player .turnStepBack:hover .icon {
+    color: #CCC;
+}
+
+.window.dark #player .variableQueryPanel {
+    background: #1a1a1a;
+    border-bottom-color: #333;
+}
+
+.window.dark #player .variableQueryInput {
+    background: #282828;
+    border-color: #444;
+    color: #CCC;
+}
+
+.window.dark #player .variableQueryInput:focus {
+    border-color: #666;
+}
+
+.window.dark #player .variableQueryBtn,
+.window.dark #player .variableListBtn {
+    background: #333;
+    border-color: #444;
+    color: #CCC;
+}
+
+.window.dark #player .variableQueryBtn:hover,
+.window.dark #player .variableListBtn:hover {
+    background: #444;
+}
+
+.window.dark #player .variableQueryResult {
+    background: #282828;
+    border-color: #444;
+    color: #CCC;
+}
+
+.window.dark #toolbar .pathJumpInput {
+    background: #282828;
+    border-color: #444;
+    color: #CCC;
+}
+
+.window.dark #toolbar .pathJumpInput:focus {
+    border-color: #666;
+}
+
+.window.dark #toolbar .pathJumpGo {
+    background: #333 !important;
+    border-color: #444 !important;
+    color: #CCC !important;
+}
+
+.window.dark #toolbar .pathJumpGo:hover {
+    background: #444 !important;
+}
+
+.window.dark #toolbar .issue-popup {
+    background: #282828;
+    border-color: #444;
+}
+
+.window.dark #toolbar .issue-popup .row:hover {
+    background: #333;
+}
+
+.window.dark #toolbar .issue-popup .row {
+    border-bottom-color: #444;
+}
+
+.window.dark #toolbar .issue-popup .line-no {
+    background: #333;
+    border-right-color: #444;
+    color: #CCC;
+}
+
+.window.dark #toolbar .issue-popup .issue {
+    color: #CCC;
+}
+
+.window.dark #toolbar .issue-popup .icon-right-open-big {
+    color: #666;
+}
+
+.window.dark #toolbar p.issuesMessage {
+    color: #888;
+}
+
+.window.dark #toolbar div.issuesSummary {
+    color: #888;
+}
+
+.window.dark #toolbar div.issuesSummary .issueCount {
+    color: #CCC;
+}
+
+.window.dark #editor .ace_tooltip {
+    background: #333;
+    border-color: #555;
+    color: #CCC;
+    box-shadow: 0 3px 5px 0px rgba(0,0,0,0.3);
+}
+
+.window.dark #save-dialog-overlay {
+    background: rgba(0, 0, 0, 0.6);
+}
+
+.window.dark .save-dialog {
+    background: #282828;
+    border-color: #444;
+}
+
+.window.dark .save-dialog-message {
+    color: #CCC;
+}
+
+.window.dark .save-dialog-detail {
+    color: #888;
+}
+
+.window.dark .save-dialog-buttons .btn {
+    background: #333;
+    background-image: none;
+    border: 1px solid #444;
+    color: #CCC;
+    box-shadow: none;
+}
+
+.window.dark .save-dialog-buttons .btn:hover {
+    background: #444;
+}
+
+.window.dark .save-dialog-buttons .btn-primary {
+    background: #0d6efd;
+    background-image: none;
+    border: 1px solid #0d6efd;
+    color: #fff;
+}
+
+.window.dark .save-dialog-buttons .btn-primary:hover {
+    background: #0b5ed7;
+    border-color: #0a58ca;
 }

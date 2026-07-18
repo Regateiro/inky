@@ -1,9 +1,11 @@
+const EventEmitter = require("events");
 const path = require("path");
 const fs = require("fs");
 const assert = require("assert");
 
 const {ipcRenderer} = require("electron")
 const mkdirp = require('mkdirp');
+const i18n = require('./i18n.js');
 
 const InkFileSymbols = require("./inkFileSymbols.js").InkFileSymbols;
 
@@ -17,7 +19,8 @@ var fileIdCounter = 0;
 // -----------------------------------------------------------------
 
 // anyPath can be relative or absolute
-function InkFile(anyPath, mainInkFile, isBrandNew, inkMode, events) {
+function InkFile(anyPath, mainInkFile, isBrandNew, inkMode) {
+    EventEmitter.call(this);
     
     this.id = fileIdCounter++;
     this.inkMode = inkMode;
@@ -49,8 +52,6 @@ function InkFile(anyPath, mainInkFile, isBrandNew, inkMode, events) {
         this.relPath = anyPath;
     }
 
-    this.events = events;
-
     // Create new Inky files with a comment already embedded placeholder comment.
     // This is a temporary solution to prevent the "INCLUDE x" blank file destructive deletion
     // issue, where saving automatically created blank files prevented properly saving and
@@ -68,10 +69,9 @@ function InkFile(anyPath, mainInkFile, isBrandNew, inkMode, events) {
 
     this.includes = [];
 
-    // Temporarily set after fs.readFile completes so
-    // we don't get a double fileChanged callback before
-    // we're ready for it.
-    // TODO: Verify this is true - can we simplify?
+    // Set to true during aceDocument.setValue() in tryLoadFromDisk
+    // to suppress the fileChanged event from the "change" handler,
+    // since we emit it explicitly after loading completes.
     this.justLoadedContent = false;
 
     // Flag to detect files that have data that hasn't been saved 
@@ -87,7 +87,7 @@ function InkFile(anyPath, mainInkFile, isBrandNew, inkMode, events) {
     this.symbols = new InkFileSymbols(this, {
         includesChanged: (includes) => {
             this.includes = includes.slice();
-            this.events.includesChanged();
+            this.emit("includesChanged");
         }
     });
 
@@ -100,7 +100,7 @@ function InkFile(anyPath, mainInkFile, isBrandNew, inkMode, events) {
     this.tryLoadFromDisk(err => {
         if( err ) {
             this.hasUnsavedChanges = true;
-            this.events.loadError(err);
+            this.emit("loadError", err);
         } else {
             this.hasUnsavedChanges = false;
             this.isLoading = false;
@@ -113,10 +113,13 @@ function InkFile(anyPath, mainInkFile, isBrandNew, inkMode, events) {
         this.justSaved = false;
         
         if( !this.justLoadedContent ) 
-            this.events.fileChanged();
+            this.emit("fileChanged");
     });
 
 }
+
+InkFile.prototype = Object.create(EventEmitter.prototype);
+InkFile.prototype.constructor = InkFile;
 
 InkFile.prototype.isMain = function() {
     return this.mainInkFile == null;
@@ -124,11 +127,6 @@ InkFile.prototype.isMain = function() {
 
 InkFile.prototype.filename = function() {
     return path.basename(this.relPath);
-}
-
-// 20/09/2016 - Now using relative paths internally.
-InkFile.prototype.relativePath = function() {
-    return this.relPath;
 }
 
 InkFile.prototype.absolutePath = function() {
@@ -193,15 +191,23 @@ InkFile.prototype.save = function(afterSaveCallback) {
         this.justSaved = true;
         var fileContent = this.aceDocument.getValue() || "";
         
-        // Ensure that the enclosing folder exists beforehand
         var fileAbsPath = this.absolutePath();
         var fileDirectory = path.dirname(fileAbsPath);
-        mkdirp.sync(fileDirectory);
+        try {
+            mkdirp.sync(fileDirectory);
+        } catch (mkdirErr) {
+            console.error("Failed to create directory for save:", mkdirErr);
+            alert(`${i18n._("Could not save file: failed to create directory")} ${fileDirectory}`);
+            if (afterSaveCallback) afterSaveCallback(false);
+            return;
+        }
 
         fs.writeFile(fileAbsPath, fileContent, "utf8", (err) => {
-            if( err ) 
+            if( err ) {
+                console.error("Failed to save file:", err);
+                alert(`${i18n._("Could not save file:")} ${err.message}`);
                 afterSaveCallback(false);
-            else {
+            } else {
                 this.hasUnsavedChanges = false;
                 afterSaveCallback(true);
             }
@@ -211,8 +217,22 @@ InkFile.prototype.save = function(afterSaveCallback) {
 
 InkFile.prototype.deleteFromDisk = function() {
     var absPath = this.absolutePath();
-    if( absPath )
-        fs.exists(absPath, (exists) => { if( exists ) fs.unlink(absPath) });
+    if( !absPath ) return;
+
+    fs.stat(absPath, (err, stats) => {
+        if( err || !stats || !stats.isFile() ) {
+            if( err && err.code !== "ENOENT" ) {
+                console.error("Failed to check file for deletion:", err);
+            }
+            return;
+        }
+        fs.unlink(absPath, (unlinkErr) => {
+            if( unlinkErr ) {
+                console.error("Failed to delete file:", unlinkErr);
+                alert(`${i18n._("Could not delete file:")} ${unlinkErr.message}`);
+            }
+        });
+    });
 }
 
 InkFile.prototype.tryLoadFromDisk = function(loadCallback) {
@@ -254,16 +274,14 @@ InkFile.prototype.tryLoadFromDisk = function(loadCallback) {
             // like document change get fired
             loadCallback(null);
 
-            // Temporarily set justLoadedContent to true so that
-            // we don't get a double fileChanged callback before
-            // we're ready for it.
-            // TODO: Verify this is true - can we simplify?
+            // Suppress fileChanged from the "change" handler triggered by setValue();
+            // we emit it explicitly below after loading completes.
             this.justLoadedContent = true;
 
             this.aceDocument.setValue(data);
             if( this.aceSession ) this.aceSession.setUndoManager(new ace.UndoManager());
             this.hasUnsavedChanges = false;
-            this.events.fileChanged();
+            this.emit("fileChanged");
 
             // Force immediate symbol re-parse (rather than the lazy scheduling)
             // in the newly loaded state so that we gather the includes and
@@ -276,12 +294,37 @@ InkFile.prototype.tryLoadFromDisk = function(loadCallback) {
     });
 }
 
+InkFile.prototype.rename = function(newRelPath) {
+    var oldRelPath = this.relPath;
+    this.relPath = newRelPath;
+    if( this.isMain() ) {
+        this.projectDir = path.dirname(this.absolutePath());
+    }
+    return { oldPath: oldRelPath, newPath: newRelPath };
+}
+
+InkFile.prototype.replaceIncludeInDocument = function(oldPath, newPath) {
+    var session = this.getAceSession();
+    var totalLines = session.getLength();
+    for(var row = 0; row < totalLines; row++) {
+        var line = session.getLine(row);
+        var match = line.match(/^INCLUDE\s+(.+)/);
+        if( match && match[1].trim() === oldPath ) {
+            var prefix = line.substring(0, line.indexOf(oldPath));
+            this.aceDocument.replace(
+                { start: { row: row, column: prefix.length }, end: { row: row, column: prefix.length + oldPath.length } },
+                newPath
+            );
+        }
+    }
+}
+
 InkFile.prototype.addIncludeLine = function(relativePath) {
 
     // Normally we allow the InkFileSymbols class to do this,
     // but by the time it gets round to doing parsing, it'll be too late.
     this.includes.push(path.normalize(relativePath));
-    this.events.includesChanged();
+    this.emit("includesChanged");
 
     // Insert the include text itself
     var includeText = "INCLUDE "+relativePath+"\n";
@@ -291,6 +334,27 @@ InkFile.prototype.addIncludeLine = function(relativePath) {
     } else {
         var lastIncludeRowContent = this.aceDocument.getLine(lastIncludeRow);
         this.aceDocument.insert({row: lastIncludeRow, column: lastIncludeRowContent.length}, "\n" + includeText);
+    }
+}
+
+InkFile.prototype.removeIncludeLine = function(relativePath) {
+    relativePath = path.normalize(relativePath);
+    this.includes = this.includes.filter(inc => inc !== relativePath);
+    this.emit("includesChanged");
+
+    var session = this.getAceSession();
+    var totalLines = session.getLength();
+    for(var row = 0; row < totalLines; row++) {
+        var line = session.getLine(row);
+        var match = line.match(/^INCLUDE\s+(.+)/);
+        if( match && match[1].trim() === relativePath ) {
+            var lineStart = {row: row, column: 0};
+            var lineEnd = {row: row, column: line.length};
+            if( row < totalLines - 1 )
+                lineEnd = {row: row + 1, column: 0};
+            this.aceDocument.remove({start: lineStart, end: lineEnd});
+            break;
+        }
     }
 }
 

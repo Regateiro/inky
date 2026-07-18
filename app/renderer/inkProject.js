@@ -1,3 +1,4 @@
+const EventEmitter = require("events");
 const {ipcRenderer} = require("electron");
 const path = require("path");
 const fs = require("fs");
@@ -13,12 +14,13 @@ const NavView = require("./navView.js").NavView;
 
 const InkFile = require("./inkFile.js").InkFile;
 const LiveCompiler = require("./liveCompiler.js").LiveCompiler;
+const { debug, debugTrace, debugError } = require("./debug.js");
 
 // -----------------------------------------------------------------
 // InkProject
 // -----------------------------------------------------------------
 
-InkProject.events = {};
+InkProject.eventEmitter = new EventEmitter();
 InkProject.currentProject = null;
 
 // mainInkFilePath is optional, if creating a brand new untitled project
@@ -48,33 +50,32 @@ function InkProject(mainInkFilePath) {
 }
 
 InkProject.prototype.createInkFile = function(anyPath, isBrandNew, loadErrorCallback) {
-    var inkFile = new InkFile(anyPath || null, this.mainInk, isBrandNew, this.inkMode, {
-        fileChanged: () => { 
-            if( inkFile.hasUnsavedChanges && !this.unsavedFiles.contains(inkFile) ) {
-                this.unsavedFiles.push(inkFile);
-                this.refreshUnsavedChanges();
-            }
+    var inkFile = new InkFile(anyPath || null, this.mainInk, isBrandNew, this.inkMode);
 
-            // When a file is changed its state may change to have unsaved changes,
-            // which should be reflected in the sidebar (unsaved files are bold).
-            // Newly added INCLUDE lines get the callback includesChanged, below.
-            this.refreshIncludes();
-        },
-
-        // Called when InkFile finds an INCUDE line in the contents of the file
-        includesChanged: () => {         
-            this.refreshIncludes();
-            if( inkFile.includes.length > 0  )
-                NavView.initialShow();
-        },
-
-        loadError: err => {
-            if( loadErrorCallback )
-                loadErrorCallback(err);
+    inkFile.on("fileChanged", () => { 
+        if( inkFile.hasUnsavedChanges && !this.unsavedFiles.contains(inkFile) ) {
+            this.unsavedFiles.push(inkFile);
+            this.refreshUnsavedChanges();
         }
 
-
+        // When a file is changed its state may change to have unsaved changes,
+        // which should be reflected in the sidebar (unsaved files are bold).
+        // Newly added INCLUDE lines get the callback includesChanged, below.
+        this.refreshIncludes();
     });
+
+    // Called when InkFile finds an INCUDE line in the contents of the file
+    inkFile.on("includesChanged", () => {         
+        this.refreshIncludes();
+        if( inkFile.includes.length > 0  )
+            NavView.initialShow();
+    });
+
+    if( loadErrorCallback ) {
+        inkFile.on("loadError", (err) => {
+            loadErrorCallback(err);
+        });
+    }
 
     this.files.push(inkFile);
 
@@ -92,7 +93,7 @@ InkProject.prototype.addNewInclude = function(newIncludePath, addToMainInk) {
     }
 
     // Make sure it doesn't already exist
-    var alreadyExists = _.some(this.files, (f) => f.relativePath() == newIncludePath);
+    var alreadyExists = _.some(this.files, (f) => f.relPath == newIncludePath);
     if( alreadyExists ) {
         alert(`${i18n._("Could not create new include file at")} ${newIncludePath} ${i18n._("because it already exists!")}`);
         return null;
@@ -101,18 +102,26 @@ InkProject.prototype.addNewInclude = function(newIncludePath, addToMainInk) {
     var newIncludeFile = this.createInkFile(newIncludePath || null, isBrandNew = true);
 
     if( addToMainInk )
-        this.mainInk.addIncludeLine(newIncludeFile.relativePath());
+        this.mainInk.addIncludeLine(newIncludeFile.relPath);
 
-    NavView.setFiles(this.mainInk, this.files);
+    NavView.setFiles(this.mainInk, this.files, this.buildIncludeHierarchy());
     EditorView.setFiles(this.files);
     return newIncludeFile;
+}
+
+InkProject.prototype.scheduleRefreshIncludes = function() {
+    if( this._refreshIncludesTimer ) clearTimeout(this._refreshIncludesTimer);
+    this._refreshIncludesTimer = setTimeout(() => {
+        this._refreshIncludesTimer = null;
+        this.refreshIncludes();
+    }, 100);
 }
 
 // - Load any newly discovered includes
 // - Refresh nav hierarchy in sidebar
 InkProject.prototype.refreshIncludes = function() {
 
-    var existingRelFilePaths = _.map(_.without(this.files, this.mainInk), f => f.relativePath());
+    var existingRelFilePaths = _.map(_.without(this.files, this.mainInk), f => f.relPath);
 
     var relPathsFromINCLUDEs = [];
     var addIncludePathsFromFile = (inkFile) => {
@@ -139,7 +148,7 @@ InkProject.prototype.refreshIncludes = function() {
 
     // Mark files that are spare, so they go in a special category at the bottom
     this.files.forEach(f => {
-        f.isSpare = spareRelFilePaths.indexOf(f.relativePath()) != -1;
+        f.isSpare = spareRelFilePaths.indexOf(f.relPath) != -1;
     });
 
     // Load up newly mentioned include files, if they exist
@@ -148,7 +157,7 @@ InkProject.prototype.refreshIncludes = function() {
             let absPath = path.join(this.mainInk.projectDir, newIncludeRelPath);
             fs.stat(absPath, (err, stats) => {
                 // If it exists, and double check that it hasn't already been created during the async fs.stat
-                if( !!stats && stats.isFile() &&  !_.some(this.files, f => f.relativePath() == newIncludeRelPath) ) {
+                if( !!stats && stats.isFile() &&  !_.some(this.files, f => f.relPath == newIncludeRelPath) ) {
                     let newFile = this.createInkFile(newIncludeRelPath, isBrandNew = false, err => {
                         alert(`${i18n._("Failed to load ink file:")} ${err}`);
                         this.files.remove(newFile);
@@ -162,7 +171,7 @@ InkProject.prototype.refreshIncludes = function() {
         this.sortFileList();
     }
 
-    NavView.setFiles(this.mainInk, this.files);
+    NavView.setFiles(this.mainInk, this.files, this.buildIncludeHierarchy());
     EditorView.setFiles(this.files);
     LiveCompiler.setEdited();
 }
@@ -179,13 +188,24 @@ InkProject.prototype.refreshUnsavedChanges = function() {
     this.hasUnsavedChanges = this.unsavedFiles.length > 0;
 
     // Update NavView for whether files are bold or not
-    // TODO: This could be faster if it simply refreshes the state rather than
-    // rebuilding the entire nav view hierarchy
-    NavView.setFiles(this.mainInk, this.files);
+    NavView.refreshFileStates(this.files);
 
     // Overall, are there *any* unsaved changes, and has the state changed?
     // Change the dot in the Mac close window button
     ipcRenderer.send("change-mac-dot", this.hasUnsavedChanges);
+
+    this.sendProjectState();
+}
+
+InkProject.prototype.sendProjectState = function() {
+    ipcRenderer.send("project-state-changed", {
+        hasUnsavedChanges: this.hasUnsavedChanges,
+        isReady: this.ready,
+        hasProject: !!this.mainInk,
+        hasActiveFile: !!this.activeInkFile,
+        activeFileIsMainInk: this.activeInkFile === this.mainInk,
+        currentFilename: this.activeInkFile ? this.activeInkFile.filename() : null,
+    });
 }
 
 InkProject.prototype.startFileWatching = function() {
@@ -194,8 +214,13 @@ InkProject.prototype.startFileWatching = function() {
         return;
     }
 
-    if( this.fileWatcher )
-        this.fileWatcher.close();
+    if( this.fileWatcher ) {
+        try {
+            this.fileWatcher.close();
+        } catch (closeErr) {
+            console.error("Failed to close file watcher:", closeErr);
+        }
+    }
 
     this.fileWatcher = chokidar.watch(this.mainInk.projectDir, {
         disableGlobbing: true
@@ -228,7 +253,7 @@ InkProject.prototype.startFileWatching = function() {
         if (!isInkFile(newlyFoundAbsFilePath)) { return; }
 
         var relPath = path.relative(this.mainInk.projectDir, newlyFoundAbsFilePath);
-        var existingFile = _.find(this.files, f => f.relativePath() == relPath);
+        var existingFile = _.find(this.files, f => f.relPath == relPath);
         if( !existingFile ) {
             console.log("Watch found new file - creating it: "+relPath);
 
@@ -238,8 +263,7 @@ InkProject.prototype.startFileWatching = function() {
                 this.refreshIncludes();
             });
 
-            // TODO: Find a way to refresh includes without spamming it
-            this.refreshIncludes();
+            this.scheduleRefreshIncludes();
         } else {
             console.log("Watch found file but it already existed: "+relPath);
         }
@@ -251,7 +275,7 @@ InkProject.prototype.startFileWatching = function() {
         if (!isInkFile(updatedAbsFilePath)) { return; }
 
         var relPath = path.relative(this.mainInk.projectDir, updatedAbsFilePath);
-        var inkFile = _.find(this.files, f => f.relativePath() == relPath);
+        var inkFile = _.find(this.files, f => f.relPath == relPath);
         if( inkFile ) {
             // TODO: maybe ask user if they want to overwrite? not sure I want to though
             if( !inkFile.hasUnsavedChanges ) {
@@ -272,7 +296,7 @@ InkProject.prototype.startFileWatching = function() {
         if (!isInkFile(removedAbsFilePath)) { return; }
 
         var relPath = path.relative(this.mainInk.projectDir, removedAbsFilePath);
-        var inkFile = _.find(this.files, f => f.relativePath() == relPath);
+        var inkFile = _.find(this.files, f => f.relPath == relPath);
         if( inkFile ) {
             if( !inkFile.hasUnsavedChanges && inkFile != this.mainInk ) {
                 this.deleteInkFile(inkFile);
@@ -280,10 +304,19 @@ InkProject.prototype.startFileWatching = function() {
         }
     });
 
-    this.fileWatcher.on("ready", () => this.ready = true);
+    this.fileWatcher.on("ready", () => {
+        this.ready = true;
+        this.sendProjectState();
+    });
+
+    this.fileWatcher.on("error", (error) => {
+        console.error("File watcher error:", error);
+        alert(`${i18n._("File watching error:")} ${error.message}`);
+    });
 }
 
 InkProject.prototype.showInkFile = function(inkFile) {
+    debugTrace("inkProject.showInkFile", typeof inkFile === 'string' ? inkFile : inkFile.filename());
 
     if( _.isString(inkFile) )
         inkFile = this.inkFileWithRelativePath(inkFile);
@@ -297,12 +330,19 @@ InkProject.prototype.showInkFile = function(inkFile) {
         if( this.activeInkFile )
             this.activeInkFile.isActive = true;
 
+        debug("inkProject.showInkFile: switching to", inkFile.filename(), "id:", inkFile.id);
         EditorView.showInkFile(inkFile);
-        InkProject.events.didSwitchToInkFile(this.activeInkFile);
+        InkProject.eventEmitter.emit("didSwitchToInkFile", this.activeInkFile);
+
+        this.sendProjectState();
+    } else if (!inkFile) {
+        debugError("inkProject.showInkFile: inkFile is null or undefined");
+    } else {
+        debug("inkProject.showInkFile: already showing", inkFile.filename());
     }
 }
 
-InkProject.prototype.save = function() {
+InkProject.prototype.save = function(afterSaveCallback) {
 
     // Make saving atomic, don't save again if we're already saving
     if( this.saveActive ) return;
@@ -324,9 +364,11 @@ InkProject.prototype.save = function() {
             this.refreshUnsavedChanges();
 
             if( allSuccess )
-                InkProject.events.didSave();
+                InkProject.eventEmitter.emit("didSave");
 
             this.saveActive = false;
+            if( afterSaveCallback )
+                afterSaveCallback(allSuccess);
         }
     }
 
@@ -354,14 +396,29 @@ InkProject.prototype.save = function() {
 // Helper to copy a file whilst optionally transforming the content
 function copyFile(source, destination, transform) {
     fs.readFile(source, "utf8", (err, fileContent) => {
-        if( !err && fileContent ) {
-            if( transform ) fileContent = transform(fileContent);
-            if( fileContent.length < 1 ) throw "Trying to write (copy) empty file!";
-            
-            fs.writeFile(destination, fileContent, "utf8", err => {
-                if( err ) alert(`Failed to save file '${destination}'`);
-            });
+        if( err ) {
+            console.error(`Failed to read file '${source}':`, err);
+            alert(`${i18n._("Failed to read file:")} '${source}' - ${err.message}`);
+            return;
         }
+        if( !fileContent ) {
+            console.error(`File is empty: '${source}'`);
+            alert(`${i18n._("Failed to copy file:")} '${source}' ${i18n._("is empty")}`);
+            return;
+        }
+        if( transform ) fileContent = transform(fileContent);
+        if( fileContent.length < 1 ) {
+            console.error(`Transformed content is empty for: '${source}'`);
+            alert(`${i18n._("Failed to copy file:")} transformed content is empty`);
+            return;
+        }
+        
+        fs.writeFile(destination, fileContent, "utf8", err => {
+            if( err ) {
+                console.error(`Failed to write file '${destination}':`, err);
+                alert(`${i18n._("Failed to save file:")} '${destination}' - ${err.message}`);
+            }
+        });
     });
 }
 
@@ -427,12 +484,22 @@ InkProject.prototype.export = function(exportType) {
                 if( exportType == "json" || exportType == "js" ) {
                     fs.stat(targetSavePath, (err, stats) => {
     
-                        // File already exists, or there's another error
-                        // (error when code == ENOENT means file doens't exist, which is fine)
-                        if( !err || err.code != "ENOENT" ) {
-                            if( err ) alert(`${i18n._("Sorry, could not save to")} ${targetSavePath}`);
+                        if( err && err.code != "ENOENT" ) {
+                            console.error("Error checking export path:", err);
+                            alert(`${i18n._("Sorry, could not save to")} ${targetSavePath}: ${err.message}`);
+                            return;
+                        }
     
-                            if( stats.isFile() ) fs.unlinkSync(targetSavePath);
+                        if( !err ) {
+                            if( stats.isFile() ) {
+                                try {
+                                    fs.unlinkSync(targetSavePath);
+                                } catch (unlinkErr) {
+                                    console.error("Failed to remove existing file for export:", unlinkErr);
+                                    alert(`${i18n._("Could not replace existing file:")} ${unlinkErr.message}`);
+                                    return;
+                                }
+                            }
     
                             if( stats.isDirectory() ) {
                                 alert(i18n._("Could not save because directory exists with the given name"));
@@ -512,8 +579,13 @@ InkProject.prototype.buildForWeb = function(jsonFilePath, targetDirectory) {
         storyTitle = mainInkTagDict["title"];
     }
 
-    // Create target directory name
-    mkdirp.sync(targetDirectory);
+    try {
+        mkdirp.sync(targetDirectory);
+    } catch (mkdirErr) {
+        console.error("Failed to create export directory:", mkdirErr);
+        alert(`${i18n._("Could not create export directory:")} ${mkdirErr.message}`);
+        return;
+    }
 
     // Create JS story file with correct name
     var jsFullPath = path.join(targetDirectory, this.jsFilename());
@@ -543,29 +615,61 @@ InkProject.prototype.buildForWeb = function(jsonFilePath, targetDirectory) {
 
 InkProject.prototype.tryClose = function() {
     if( this.hasUnsavedChanges ) {
-        ipcRenderer.invoke("try-close").then((responseObject) => {
-            var response = responseObject.response;
-            if( response == 0 ) {
-                this.save(false, () => {
-                    this.closeImmediate();
-                });
-            }
-            
-            // Don't save
-            else if( response == 1 ) {
-                this.closeImmediate();
-            }
-            
-            // Cancel
-            else { 
-                ipcRenderer.send("project-cancelled-close");
-            }
-            })
+        this.showSaveDialog();
     }
     // Nothing to save, just exit
     else {
         this.closeImmediate();
     }
+}
+
+InkProject.prototype.showSaveDialog = function() {
+    var self = this;
+    var overlay = document.getElementById('save-dialog-overlay');
+    overlay.classList.remove('hidden');
+
+    function handleKeyDown(e) {
+        if( (e.metaKey || e.ctrlKey) && e.key === 'd' ) {
+            e.preventDefault();
+            cleanup();
+            self.closeImmediate();
+        }
+        if( e.key === 'Escape' ) {
+            e.preventDefault();
+            cleanup();
+            ipcRenderer.send("project-cancelled-close");
+        }
+    }
+
+    function cleanup() {
+        document.removeEventListener('keydown', handleKeyDown);
+        overlay.classList.add('hidden');
+        overlay.querySelector('.save-dialog-save').removeEventListener('click', onSave);
+        overlay.querySelector('.save-dialog-dont-save').removeEventListener('click', onDontSave);
+        overlay.querySelector('.save-dialog-cancel').removeEventListener('click', onCancel);
+    }
+
+    function onSave() {
+        cleanup();
+        self.save(false, function() {
+            self.closeImmediate();
+        });
+    }
+
+    function onDontSave() {
+        cleanup();
+        self.closeImmediate();
+    }
+
+    function onCancel() {
+        cleanup();
+        ipcRenderer.send("project-cancelled-close");
+    }
+
+    document.addEventListener('keydown', handleKeyDown);
+    overlay.querySelector('.save-dialog-save').addEventListener('click', onSave);
+    overlay.querySelector('.save-dialog-dont-save').addEventListener('click', onDontSave);
+    overlay.querySelector('.save-dialog-cancel').addEventListener('click', onCancel);
 }
 
 // Response from the close menu
@@ -575,12 +679,38 @@ InkProject.prototype.closeImmediate = function() {
     ipcRenderer.send("project-final-close");
 }
 
+InkProject.prototype.getIncludedFilesFor = function(inkFile) {
+    return _.map(inkFile.includes, relPath => this.inkFileWithRelativePath(relPath)).filter(f => !!f);
+}
+
+InkProject.prototype.buildIncludeHierarchy = function() {
+    var hierarchy = {};
+    this.files.forEach(f => {
+        hierarchy[f.id] = this.getIncludedFilesFor(f);
+    });
+    return hierarchy;
+}
+
 InkProject.prototype.inkFileWithRelativePath = function(relativePath) {
-    return _.find(this.files, f => f.relativePath().replace('\\', '/') == relativePath);
+    var result = _.find(this.files, f => f.relPath.replace('\\', '/') == relativePath);
+    debugTrace("inkProject.inkFileWithRelativePath", relativePath, "found:", !!result);
+    return result;
+}
+
+InkProject.prototype.inkFileWithAbsolutePath = function(absPath) {
+    if( !this.mainInk || !this.mainInk.projectDir ) return null;
+    var result = _.find(this.files, f => {
+        let fileAbsPath = f.absolutePath();
+        return fileAbsPath && path.resolve(fileAbsPath) === path.resolve(absPath);
+    });
+    debugTrace("inkProject.inkFileWithAbsolutePath", absPath, "found:", !!result);
+    return result;
 }
 
 InkProject.prototype.inkFileWithId = function(id) {
-    return _.find(this.files, f => f.id == id);
+    var result = _.find(this.files, f => f.id == id);
+    debugTrace("inkProject.inkFileWithId", id, "found:", !!result);
+    return result;
 }
 
 InkProject.prototype.deleteInkFile = function(inkFile) {
@@ -588,12 +718,83 @@ InkProject.prototype.deleteInkFile = function(inkFile) {
     if( this.activeInkFile == inkFile )
         this.showInkFile(this.mainInk);
 
+    LiveCompiler.removeTempFile(inkFile.relPath);
+
     inkFile.deleteFromDisk();
 
     this.files.remove(inkFile);
 
-    NavView.setFiles(this.mainInk, this.files);
+    NavView.setFiles(this.mainInk, this.files, this.buildIncludeHierarchy());
     EditorView.setFiles(this.files);
+}
+
+InkProject.prototype.renameInkFile = function(inkFile, newRelPath) {
+    var oldRelPath = inkFile.relPath;
+    var oldFilename = inkFile.filename();
+    inkFile.rename(newRelPath);
+
+    this.files.forEach(f => {
+        if( f !== inkFile ) {
+            f.replaceIncludeInDocument(oldRelPath, newRelPath);
+            f.includes = f.includes.map(inc => inc === oldRelPath ? newRelPath : inc);
+        }
+    });
+
+    this.sortFileList();
+    this.refreshIncludes();
+    NavView.setFiles(this.mainInk, this.files, this.buildIncludeHierarchy());
+    EditorView.setFiles(this.files);
+}
+
+InkProject.prototype.deleteInkFileWithIncludes = function(inkFile) {
+    this.files.forEach(f => {
+        if( f !== inkFile ) {
+            f.replaceIncludeInDocument(inkFile.relPath, "");
+        }
+    });
+
+    this.deleteInkFile(inkFile);
+}
+
+InkProject.prototype.moveInclude = function(fileId, newParentId) {
+    var draggedFile = this.inkFileWithId(fileId);
+    if( !draggedFile || draggedFile === this.mainInk ) return false;
+
+    var findCurrentParent = (file) => {
+        for( var i = 0; i < this.files.length; i++ ) {
+            if( this.files[i].includes.indexOf(file.relPath) !== -1 )
+                return this.files[i];
+        }
+        return null;
+    };
+
+    var currentParent = findCurrentParent(draggedFile);
+
+    if( newParentId === null ) {
+        if( currentParent ) currentParent.removeIncludeLine(draggedFile.relPath);
+        this.refreshIncludes();
+        return true;
+    }
+
+    var newParent = this.inkFileWithId(newParentId);
+    if( !newParent || newParent === draggedFile ) return false;
+
+    var wouldCauseCircular = false;
+    var checkFile = newParent;
+    while( checkFile ) {
+        if( checkFile === draggedFile ) { wouldCauseCircular = true; break; }
+        checkFile = findCurrentParent(checkFile);
+    }
+    if( wouldCauseCircular ) return false;
+
+    if( currentParent === newParent ) return false;
+
+    if( currentParent ) currentParent.removeIncludeLine(draggedFile.relPath);
+    newParent.addIncludeLine(draggedFile.relPath);
+
+    this.sortFileList();
+    this.refreshIncludes();
+    return true;
 }
 
 InkProject.prototype.findSymbol = function(name, posContext) {
@@ -698,7 +899,9 @@ InkProject.prototype.refreshProjectSettings = function(newProjectSettings) {
 
 
 InkProject.setEvents = function(e) {
-    InkProject.events = e;
+    for (const [key, handler] of Object.entries(e)) {
+        InkProject.eventEmitter.on(key, handler);
+    }
 }
 
 InkProject.startNew = function() {
@@ -711,7 +914,8 @@ InkProject.loadProject = function(mainInkPath) {
 
 InkProject.setProject = function(project) {
     InkProject.currentProject = project;
-    InkProject.events.newProject(project);
+    InkProject.eventEmitter.emit("newProject", project);
+    project.sendProjectState();
 }
 
 ipcRenderer.on("set-project-main-ink-filepath", (event, filePath) => {
@@ -721,6 +925,14 @@ ipcRenderer.on("set-project-main-ink-filepath", (event, filePath) => {
 ipcRenderer.on("open-main-ink", (event) => {
     if( InkProject.currentProject ) {
         InkProject.currentProject.showInkFile(InkProject.currentProject.mainInk);
+    }
+});
+
+ipcRenderer.on("open-ink-file-by-path", (event, absPath) => {
+    if( !InkProject.currentProject ) return;
+    let inkFile = InkProject.currentProject.inkFileWithAbsolutePath(absPath);
+    if( inkFile ) {
+        InkProject.currentProject.showInkFile(inkFile);
     }
 });
 
@@ -764,6 +976,68 @@ ipcRenderer.on("project-tryClose", (event) => {
 ipcRenderer.on("project-settings-changed", (event, settings) => {
     if( InkProject.currentProject ) {
         InkProject.currentProject.refreshProjectSettings(settings);
+    }
+});
+
+NavView.on("renameFileId", (fileId) => {
+    NavView.startRenameFile(fileId);
+});
+
+NavView.on("deleteFileId", (fileId) => {
+    if( !InkProject.currentProject ) return;
+    var inkFile = InkProject.currentProject.inkFileWithId(fileId);
+    if( inkFile && inkFile != InkProject.currentProject.mainInk ) {
+        InkProject.currentProject.deleteInkFileWithIncludes(inkFile);
+    }
+});
+
+NavView.on("moveInclude", (fileId, targetId) => {
+    if( !InkProject.currentProject ) return;
+    InkProject.currentProject.moveInclude(fileId, targetId);
+});
+
+NavView.on("renameFileConfirmed", (fileId, newName) => {
+    if( !InkProject.currentProject ) return;
+    var inkFile = InkProject.currentProject.inkFileWithId(fileId);
+    if( !inkFile ) return;
+
+    var oldDir = path.dirname(inkFile.relPath);
+    var newRelPath = oldDir === "." ? newName : path.join(oldDir, newName);
+
+    var alreadyExists = _.some(InkProject.currentProject.files, f => f.relPath === newRelPath && f !== inkFile);
+    if( alreadyExists ) {
+        alert(`A file named "${newName}" already exists.`);
+        return;
+    }
+
+    var mainInk = InkProject.currentProject.mainInk;
+    var oldAbsPath = inkFile.absolutePath();
+    var newAbsPath = path.join(mainInk.projectDir, newRelPath);
+
+    fs.rename(oldAbsPath, newAbsPath, (err) => {
+        if( err ) {
+            alert(`Failed to rename file: ${err.message}`);
+            return;
+        }
+        InkProject.currentProject.renameInkFile(inkFile, newRelPath);
+    });
+});
+
+ipcRenderer.on("project-rename-file", (event) => {
+    if( InkProject.currentProject && InkProject.currentProject.activeInkFile ) {
+        var activeFile = InkProject.currentProject.activeInkFile;
+        if( activeFile != InkProject.currentProject.mainInk ) {
+            NavView.startRenameFile(activeFile.id);
+        }
+    }
+});
+
+ipcRenderer.on("project-delete-file", (event) => {
+    if( InkProject.currentProject && InkProject.currentProject.activeInkFile ) {
+        var activeFile = InkProject.currentProject.activeInkFile;
+        if( activeFile != InkProject.currentProject.mainInk ) {
+            InkProject.currentProject.deleteInkFileWithIncludes(activeFile);
+        }
     }
 });
 

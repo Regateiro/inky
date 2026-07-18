@@ -32,6 +32,7 @@ if (process.platform == "darwin" || process.platform == "linux") {
 
 var sessions = {};
 
+const COMPILATION_SAFETY_TIMEOUT_MS = 30 * 1000;
 
 function compile(compileInstruction, requester) {
 
@@ -41,8 +42,12 @@ function compile(compileInstruction, requester) {
 
     var uniqueDirPath = path.join(tempInkPath, compileInstruction.namespace);
 
-    // TODO: handle errors
-    mkdirp.sync(uniqueDirPath);
+    try {
+        mkdirp.sync(uniqueDirPath);
+    } catch(e) {
+        requester.send('play-story-unexpected-error', `Could not create temporary directory '${uniqueDirPath}': ${e.message}`, sessionId);
+        return;
+    }
 
     // Write out updated files
     for(var relativePath in compileInstruction.updatedFiles) {
@@ -53,7 +58,12 @@ function compile(compileInstruction, requester) {
 
         if( path.dirname(relativePath) != "." ) {
             var fullDir = path.dirname(fullInkPath);
-            mkdirp.sync(fullDir);
+            try {
+                mkdirp.sync(fullDir);
+            } catch(e) {
+                requester.send('play-story-unexpected-error', `Could not create temporary directory '${fullDir}': ${e.message}`, sessionId);
+                return;
+            }
         }
 
         fs.writeFileSync(fullInkPath, inkFileContent, { encoding: 'utf8', flag: 'w' });
@@ -86,6 +96,10 @@ function compile(compileInstruction, requester) {
         inklecatePathToUse = path.resolve(inklecateFolderName, "inkjs-compatible", inklecateName);
     }
 
+    if( sessions[sessionId] ) {
+        stop(sessionId);
+    }
+
     const playProcess = spawn(inklecatePathToUse, inklecateOptions, {
         "cwd": path.dirname(inklecatePathToUse),
         "env": {
@@ -99,9 +113,21 @@ function compile(compileInstruction, requester) {
         stopped: false,
         ended: false,
         evaluatingExpression: false,
+        listingVariables: false,
         justRequestedDebugSource: false
     };
     var session = sessions[sessionId];
+
+    session.safetyTimeout = setTimeout(() => {
+        console.error(`Inklecate session '${sessionId}' timed out after ${COMPILATION_SAFETY_TIMEOUT_MS/1000}s, killing process`);
+        if( sessions[sessionId] ) {
+            sessions[sessionId].stopped = true;
+            sessions[sessionId].process.kill('SIGKILL');
+            requester.send('play-story-unexpected-error', `Compilation timed out after ${COMPILATION_SAFETY_TIMEOUT_MS/1000} seconds. The compiler may be hung.`, sessionId);
+            requester.send('play-exit-due-to-error', -1, sessionId);
+            delete sessions[sessionId];
+        }
+    }, COMPILATION_SAFETY_TIMEOUT_MS);
 
     playProcess.stderr.setEncoding('utf8');
     playProcess.stderr.on('data', (data) => {
@@ -126,6 +152,7 @@ function compile(compileInstruction, requester) {
 
     var onEndOfStory = (code) => {
         if( sessions[sessionId] && !sessions[sessionId].ended ) {
+            if( sessions[sessionId].safetyTimeout ) clearTimeout(sessions[sessionId].safetyTimeout);
             sessions[sessionId].ended = true;
 
             sendAnyErrors();
@@ -210,7 +237,7 @@ function compile(compileInstruction, requester) {
             
             // Compile success?
             else if( jsonResponse["compile-success"] !== undefined ) {
-                // Whether true or false, it's done
+                if( session.safetyTimeout ) clearTimeout(session.safetyTimeout);
                 requester.send('compile-complete', sessionId);
             }
             
@@ -233,6 +260,8 @@ function compile(compileInstruction, requester) {
             else if( jsonResponse.needInput ) {
                 if( session.evaluatingExpression )
                     session.evaluatingExpression = false;
+                else if( session.listingVariables )
+                    session.listingVariables = false;
                 // else if( session.justRequestedDebugSource )
                 //     session.justRequestedDebugSource = false;
                 else
@@ -251,6 +280,8 @@ function compile(compileInstruction, requester) {
                     });
                 } else if( session.evaluatingExpression ) {
                     requester.send('play-evaluated-expression', jsonResponse.cmdOutput, sessionId);
+                } else if( session.listingVariables ) {
+                    requester.send('return-variables-list', jsonResponse.cmdOutput, sessionId);
                 }
             }
             
@@ -261,6 +292,7 @@ function compile(compileInstruction, requester) {
             
             // End of story, but keep process running for debug source lookups
             else if( jsonResponse.end ) {
+                if( session.safetyTimeout ) clearTimeout(session.safetyTimeout);
                 onEndOfStory();
             }
             
@@ -281,6 +313,8 @@ function compile(compileInstruction, requester) {
             return;
         }
 
+        if( sessions[sessionId].safetyTimeout ) clearTimeout(sessions[sessionId].safetyTimeout);
+
         var forceStoppedByPlayer = sessions[sessionId].stopped;
         if( !forceStoppedByPlayer ) {
             onEndOfStory(code);
@@ -300,6 +334,7 @@ function stop(sessionId) {
     const processObj = sessions[sessionId];
     if( processObj ) {
         processObj.stopped = true;
+        if( processObj.safetyTimeout ) clearTimeout(processObj.safetyTimeout);
         processObj.process.kill('SIGTERM');
         return true;
     } else {
@@ -325,6 +360,14 @@ ipc.on("play-stop-ink", (event, sessionId) => {
     const requester = event.sender;
     if( stop(sessionId) )
         requester.send('play-story-stopped', sessionId);
+});
+
+ipc.on("remove-temp-file", (event, namespace, relativePath) => {
+    var uniqueDirPath = path.join(tempInkPath, namespace);
+    var normalizedRelPath = relativePath.replace(/\//g, path.sep);
+    var fullPath = path.join(uniqueDirPath, normalizedRelPath);
+    try { fs.unlinkSync(fullPath); }
+    catch(e) { /* file may not exist yet */ }
 });
 
 ipc.on("play-continue-with-choice-number", (event, choiceNumber, sessionId) => {
@@ -358,6 +401,24 @@ ipc.on("get-runtime-path-in-source", (event, runtimePath, sessionId) => {
         const playProcess = sessions[sessionId].process;
         if( playProcess )
             playProcess.stdin.write("DebugPath "+runtimePath+"\n");
+    }
+});
+
+ipc.on("jump-to-path", (event, path, sessionId) => {
+    if( sessions[sessionId] ) {
+        const playProcess = sessions[sessionId].process;
+        if( playProcess )
+            playProcess.stdin.write("-> "+path+"\n");
+    }
+});
+
+ipc.on("list-variables", (event, sessionId) => {
+    var session = sessions[sessionId];
+    if( session ) {
+        if( session.process ) {
+            session.listingVariables = true;
+            session.process.stdin.write("VAR\n");
+        }
     }
 });
 

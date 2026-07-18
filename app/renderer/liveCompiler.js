@@ -1,7 +1,9 @@
+const EventEmitter = require("events");
 const ipc = require("electron").ipcRenderer;
 const _ = require("lodash");
 const randomstring = require("randomstring");
 const i18n = require('./i18n.js');
+const { debug, debugTrace, debugError } = require("./debug.js");
 
 var namespace = null;
 var sessionIdx = 0;
@@ -13,6 +15,8 @@ var exportCompleteCallback = null;
 
 var lastEditorChange = null;
 var reloadPending = false;
+var paused = false;
+var compilePending = false;
 
 var choiceSequence = [];
 var currentTurnIdx = -1;
@@ -23,13 +27,17 @@ var selectedIssueIdx = -1;
 
 var locationInSourceCallbackObj = null;
 var expressionEvaluationObj = null;
+var variablesListCallbackObj = null;
+var jumpToPathCallbackObj = null;
 
 var project = null;
-var events = {};
+
+const LiveCompiler = new EventEmitter();
 
 var compilerBusy = false;
 
 function setProject(p) {
+    debugTrace("liveCompiler.setProject", p.mainInk.filename());
     project = p;
 
     // Generate the namespace just once so it stays constant all the while the project/app is open
@@ -61,7 +69,7 @@ function buildCompileInstruction() {
         // Add Ink Files with changes to be saved before the next compile
         // If we're running for the first time, add all because non of the files has been saved to tempInkPath
         if( inkFile.compilerVersionDirty ) {
-            compileInstruction.updatedFiles[inkFile.relativePath()] = inkFile.getValue();
+            compileInstruction.updatedFiles[inkFile.relPath] = inkFile.getValue();
             inkFile.compilerVersionDirty = false;
         }
     });
@@ -76,13 +84,15 @@ function sessionIsCurrent(id) {
 function updateCompilerIsBusy(isBusy) {
     if( isBusy != compilerBusy ) {
         compilerBusy = isBusy;
-        events.compilerBusyChanged(compilerBusy);
+        LiveCompiler.emit("compilerBusyChanged", compilerBusy);
     }
 }
 
 function reloadInklecateSession() {
+    debugTrace("liveCompiler.reloadInklecateSession");
 
     if( project == null || !project.ready ) {
+        debug("liveCompiler.reloadInklecateSession: project not ready, setting reloadPending");
         reloadPending = true;
         updateCompilerIsBusy(true);
         return;
@@ -100,13 +110,13 @@ function reloadInklecateSession() {
     var instr = buildCompileInstruction();
     instr.play = true;
 
-    events.resetting(instr.sessionId);
+    LiveCompiler.emit("resetting", instr.sessionId);
 
     resetErrors();
 
     currentPlaySessionId = instr.sessionId;
 
-    console.log("This window sending session "+instr.sessionId);
+    debug("liveCompiler.reloadInklecateSession: sending compile instruction for session", instr.sessionId);
     ipc.send("compile", instr);
 
     updateCompilerIsBusy(true);
@@ -173,6 +183,23 @@ function stepBack() {
     reloadInklecateSession();
 }
 
+function stepBackToTurn(turnIdx) {
+    if( turnIdx >= 0 && turnIdx < choiceSequence.length ) {
+        choiceSequence.splice(turnIdx);
+        reloadInklecateSession();
+    }
+}
+
+function jumpToPath(path, callback) {
+    ipc.send("jump-to-path", path, currentPlaySessionId);
+    jumpToPathCallbackObj = { callback: callback, sessionId: currentPlaySessionId };
+}
+
+function listVariables(callback) {
+    ipc.send("list-variables", currentPlaySessionId);
+    variablesListCallbackObj = { callback: callback, sessionId: currentPlaySessionId };
+}
+
 function getLocationInSource(offset, callback) {
     ipc.send("get-location-in-source", offset, currentPlaySessionId);
     locationInSourceCallbackObj = { callback: callback, sessionId: currentPlaySessionId };
@@ -200,6 +227,7 @@ setTimeout(reloadInklecateSession, 1000);
 // compile loop - detect changes every 0.25 and make sure
 // user has paused before actually compiling
 setInterval(() => {
+    if( paused ) return;
     if( lastEditorChange !== null && Date.now() - lastEditorChange > 500 || reloadPending ) {
         reloadInklecateSession();
     }
@@ -215,7 +243,7 @@ ipc.on("next-issue", () => {
         if( selectedIssueIdx >= issues.length )
             selectedIssueIdx = 0;
 
-        events.selectIssue(issues[selectedIssueIdx]);
+        LiveCompiler.emit("selectIssue", issues[selectedIssueIdx]);
     }
 });
 
@@ -224,25 +252,28 @@ ipc.on("next-issue", () => {
 // --------------------------------------------------------
 
 ipc.on("compile-complete", (event, fromSessionId) => {
+    debugTrace("liveCompiler.ipc.compile-complete", fromSessionId);
     if( fromSessionId != currentPlaySessionId ) return;
 
     updateCompilerIsBusy(false);
 
-    events.compileComplete(fromSessionId);
+    LiveCompiler.emit("compileComplete", fromSessionId);
 });
 
 
 ipc.on("play-generated-text", (event, result, fromSessionId) => {
+    debugTrace("liveCompiler.ipc.play-generated-text", fromSessionId);
 
     if( fromSessionId != currentPlaySessionId ) return;
 
     // May have just finished compiling, have text
     updateCompilerIsBusy(false);
 
-    events.textAdded(result);
+    LiveCompiler.emit("textAdded", result);
 });
 
 ipc.on("play-generated-errors", (event, errors, fromSessionId) => {
+    debugTrace("liveCompiler.ipc.play-generated-errors", fromSessionId, errors.length, "errors");
 
     if( !sessionIsCurrent(fromSessionId) ) return;
 
@@ -250,7 +281,7 @@ ipc.on("play-generated-errors", (event, errors, fromSessionId) => {
     updateCompilerIsBusy(false);
 
     issues = errors;
-    events.errorsAdded(errors);
+    LiveCompiler.emit("errorsAdded", errors);
 });
 
 ipc.on("play-generated-tags", (event, tags, fromSessionId) => {
@@ -260,7 +291,7 @@ ipc.on("play-generated-tags", (event, tags, fromSessionId) => {
     // May have finished compiling
     updateCompilerIsBusy(false);
 
-    events.tagsAdded(tags);
+    LiveCompiler.emit("tagsAdded", tags);
 });
 
 ipc.on("play-generated-choice", (event, choice, fromSessionId) => {
@@ -275,7 +306,7 @@ ipc.on("play-generated-choice", (event, choice, fromSessionId) => {
     // If there's one choice, that means there are two turns/chunks
     var turnCount = choiceSequence.length+1;
     var isLatestTurn = currentTurnIdx >= turnCount-1;
-    events.choiceAdded(choice, isLatestTurn);
+    LiveCompiler.emit("choiceAdded", choice, isLatestTurn);
 });
 
 ipc.on("play-requires-input", (event, fromSessionId) => {
@@ -292,7 +323,7 @@ ipc.on("play-requires-input", (event, fromSessionId) => {
         justCompletedReplay = true;
     }
 
-    events.playerPrompt(replaying, () => {
+    LiveCompiler.emit("playerPrompt", replaying, () => {
         if( replaying ) {
             var replayChoiceNumber = choiceSequence[currentTurnIdx];
             currentTurnIdx++;
@@ -300,20 +331,20 @@ ipc.on("play-requires-input", (event, fromSessionId) => {
         } 
 
         if( justCompletedReplay ) 
-            events.replayComplete(currentPlaySessionId);
+            LiveCompiler.emit("replayComplete", currentPlaySessionId);
     });
 });
 
 ipc.on("inklecate-complete", (event, fromSessionId, exportJsonPath) => {
 
     if( fromSessionId == currentPlaySessionId ) {
-        events.storyCompleted();
+        LiveCompiler.emit("storyCompleted");
 
         updateCompilerIsBusy(false);
 
         if( replaying ) {
             replaying = false;
-            events.replayComplete(currentPlaySessionId);
+            LiveCompiler.emit("replayComplete", currentPlaySessionId);
         }
     }
     else if( fromSessionId == currentExportSessionId ) {
@@ -330,10 +361,10 @@ ipc.on("play-exit-due-to-error", (event, exitCode, fromSessionId) => {
     } else {
         if( replaying ) {
             replaying = false;
-            events.replayComplete();
+            LiveCompiler.emit("replayComplete", fromSessionId);
         }
 
-        events.exitDueToError();
+        LiveCompiler.emit("exitDueToError");
 
         updateCompilerIsBusy(false);
     }
@@ -348,10 +379,10 @@ ipc.on("play-story-unexpected-error", (event, error, fromSessionId) => {
     } else {
         if( replaying ) {
             replaying = false;
-            events.replayComplete(fromSessionId);
+            LiveCompiler.emit("replayComplete", fromSessionId);
         }
 
-        events.unexpectedError(error);
+        LiveCompiler.emit("unexpectedError", error);
 
         updateCompilerIsBusy(false);
     }
@@ -388,6 +419,14 @@ ipc.on("play-evaluated-expression-error", (event, errorMessage, fromSessionId) =
     }
 });
 
+ipc.on("return-variables-list", (event, variablesText, fromSessionId) => {
+    if( fromSessionId == variablesListCallbackObj.sessionId && variablesListCallbackObj ) {
+        var callback = variablesListCallbackObj.callback;
+        variablesListCallbackObj = null;
+        callback(variablesText);
+    }
+});
+
 ipc.on("return-stats", (event, statsObj, fromSessionId) => {
 
     if( fromSessionId != currentStatsSessionId ) return;
@@ -402,19 +441,66 @@ ipc.on("return-stats", (event, statsObj, fromSessionId) => {
 });
 
 
-exports.LiveCompiler = {
+function removeTempFile(relativePath) {
+    if( namespace )
+        ipc.send("remove-temp-file", namespace, relativePath);
+}
+
+function setEdited() {
+    lastEditorChange = Date.now();
+    if( paused ) {
+        compilePending = true;
+    }
+}
+
+function pause() {
+    debugTrace("liveCompiler.pause");
+    paused = true;
+    LiveCompiler.emit("pauseChanged", true);
+}
+
+function unpause() {
+    debugTrace("liveCompiler.unpause");
+    paused = false;
+    LiveCompiler.emit("pauseChanged", false);
+    if( compilePending ) {
+        compilePending = false;
+        reloadInklecateSession();
+    }
+}
+
+function togglePause() {
+    debugTrace("liveCompiler.togglePause", "currently paused:", paused);
+    if( paused )
+        unpause();
+    else
+        pause();
+}
+
+function isPaused() {
+    return paused;
+}
+
+exports.LiveCompiler = Object.assign(LiveCompiler, {
     setProject: setProject,
     reload: reloadInklecateSession,
     exportJson: exportJson,
-    setEdited: () => { lastEditorChange = Date.now(); },
-    setEvents: (e) => { events = e; },
+    setEdited: setEdited,
     getIssues: () => { return issues; },
     getIssuesForFilename: (filename) => _.filter(issues, i => i.filename == filename),
     choose: choose,
     rewind: rewind,
     stepBack: stepBack,
+    stepBackToTurn: stepBackToTurn,
+    jumpToPath: jumpToPath,
+    listVariables: listVariables,
     getLocationInSource: getLocationInSource,
     getRuntimePathInSource: getRuntimePathInSource,
     evaluateExpression: evaluateExpression,
-    getStats: getStats
-}
+    getStats: getStats,
+    removeTempFile: removeTempFile,
+    pause: pause,
+    unpause: unpause,
+    togglePause: togglePause,
+    isPaused: isPaused
+})

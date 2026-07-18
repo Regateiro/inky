@@ -1,9 +1,10 @@
+const EventEmitter = require("events");
 const InkProject = require("./inkProject.js").InkProject;
 const editor = ace.edit("editor");
 
 var history = [];
 var currentHistoryIdx = -1;
-var events = {};
+const NavHistory = new EventEmitter();
 var navigating = false;
 
 function go(steps) {
@@ -17,7 +18,7 @@ function go(steps) {
         currentHistoryIdx = newHistoryIdx;
 
         navigating = true;
-        events.goto(history[currentHistoryIdx]);
+        NavHistory.emit("goto", history[currentHistoryIdx]);
         navigating = false;
     }
 }
@@ -41,7 +42,7 @@ function addStep() {
         // Don't store a reference to the file itself so that
         // the reference is weak and doesn't keep old files around
         var step = {
-            filePath: file.relativePath(),
+            filePath: file.relPath,
             position: editor.getCursorPosition()
         };
 
@@ -69,10 +70,9 @@ function reset() {
     currentHistoryIdx = -1;
 }
 
-exports.NavHistory = {
-    setEvents: (e) => { events = e; },
+exports.NavHistory = Object.assign(NavHistory, {
     back: () => go(-1),
     forward: () => go(+1),
     addStep: addStep,
     reset: reset
-}
+})

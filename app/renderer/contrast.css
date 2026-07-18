@@ -1,9 +1,12 @@
 .window.contrast #main,
 .window.contrast #editor,
 .window.contrast #toolbar,
-.window.contrast #editor .ace_gutter-layer,
-.window.contrast .split {
+.window.contrast #editor .ace_gutter-layer {
     background-color: #222;
+}
+
+.window.contrast .split {
+    background-color: #3a3a3a;
 }
 
 .window.contrast #main .sidebar,
@@ -40,6 +43,10 @@
 
 .window.contrast #toolbar .button.selected .icon {
     color: #CCC;
+}
+
+.window.contrast #toolbar .button.pause-toggle.selected .icon {
+    color: #e74c3c;
 }
 
 /* e.g. filename input */
@@ -167,4 +174,143 @@
 
 .window.contrast .sidebar .nav-wrapper::-webkit-scrollbar-thumb {
     background: #323232;
+}
+
+.window.contrast #player .variableQueryPanel {
+    background: #1a1a1a;
+    border-bottom-color: #333;
+}
+
+.window.contrast #player .variableQueryInput {
+    background: #282828;
+    border-color: #444;
+    color: #CCC;
+}
+
+.window.contrast #player .variableQueryInput:focus {
+    border-color: #666;
+}
+
+.window.contrast #player .variableQueryBtn,
+.window.contrast #player .variableListBtn {
+    background: #333;
+    border-color: #444;
+    color: #CCC;
+}
+
+.window.contrast #player .variableQueryBtn:hover,
+.window.contrast #player .variableListBtn:hover {
+    background: #444;
+}
+
+.window.contrast #player .variableQueryResult {
+    background: #282828;
+    border-color: #444;
+    color: #CCC;
+}
+
+.window.contrast #toolbar .issue-popup {
+    background: #222;
+    border-color: #444;
+}
+
+.window.contrast #toolbar .issue-popup .row:hover {
+    background: #333;
+}
+
+.window.contrast #toolbar .issue-popup .row {
+    border-bottom-color: #444;
+}
+
+.window.contrast #toolbar .issue-popup .line-no {
+    background: #333;
+    border-right-color: #444;
+    color: #CCC;
+}
+
+.window.contrast #toolbar .issue-popup .issue {
+    color: #CCC;
+}
+
+.window.contrast #toolbar .issue-popup .icon-right-open-big {
+    color: #666;
+}
+
+.window.contrast #toolbar p.issuesMessage {
+    color: #888;
+}
+
+.window.contrast #toolbar div.issuesSummary {
+    color: #888;
+}
+
+.window.contrast #toolbar div.issuesSummary .issueCount {
+    color: #CCC;
+}
+
+.window.contrast #editor .ace_tooltip {
+    background: #333;
+    border-color: #555;
+    color: #CCC;
+    box-shadow: 0 3px 5px 0px rgba(0,0,0,0.3);
+}
+
+.window.contrast #save-dialog-overlay {
+    background: rgba(0, 0, 0, 0.7);
+}
+
+.window.contrast .save-dialog {
+    background: #222;
+    border-color: #444;
+}
+
+.window.contrast .save-dialog-message {
+    color: #CCC;
+}
+
+.window.contrast .save-dialog-detail {
+    color: #888;
+}
+
+.window.contrast .save-dialog-buttons .btn {
+    background: #333;
+    background-image: none;
+    border: 1px solid #444;
+    color: #CCC;
+    box-shadow: none;
+}
+
+.window.contrast .save-dialog-buttons .btn:hover {
+    background: #444;
+}
+
+.window.contrast .save-dialog-buttons .btn-primary {
+    background: #0d6efd;
+    background-image: none;
+    border: 1px solid #0d6efd;
+    color: #fff;
+}
+
+.window.contrast .save-dialog-buttons .btn-primary:hover {
+    background: #0b5ed7;
+    border-color: #0a58ca;
+}
+.window.contrast #toolbar .pathJumpInput {
+    background: #282828;
+    border-color: #444;
+    color: #CCC;
+}
+
+.window.contrast #toolbar .pathJumpInput:focus {
+    border-color: #666;
+}
+
+.window.contrast #toolbar .pathJumpGo {
+    background: #333 !important;
+    border-color: #444 !important;
+    color: #CCC !important;
+}
+
+.window.contrast #toolbar .pathJumpGo:hover {
+    background: #444 !important;
 }

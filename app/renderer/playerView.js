@@ -1,11 +1,13 @@
+const EventEmitter = require("events");
 const $ = window.jQuery = require('./jquery-2.2.3.min.js');
 const i18n = require('./i18n.js');
 
-var events = {};
+const PlayerView = new EventEmitter();
 var lastFadeTime = 0;
 var $textBuffer = null;
 var instructionPrefix = null;
 var animationEnabled = true;
+var isReplaying = false;
 
 document.addEventListener("keyup", function(){
     $("#player").removeClass("altKey");
@@ -41,10 +43,14 @@ function showSessionView(sessionId) {
 
         // Also make this the active buffer
         $textBuffer = $hidden;
+
+        isReplaying = false;
     }
 }
 
 function fadeIn($jqueryElement) {
+
+    if( isReplaying ) return;
 
     const minimumTimeSeparation = 200;
     const animDuration = 1000;
@@ -70,6 +76,9 @@ function contentReady() {
     // Need to save these ones because we are resetting height, so these are lost
     var savedScrollTop = $scrollContainer.scrollTop();
     var prevHeight = $textBuffer.height();
+
+    // Lock the scroll container height to prevent visual shrinking during reset
+    $scrollContainer.css("min-height", $scrollContainer.height());
 
     // Need to reset first, otherwise ($textBuffer[0].scrollHeight) is always not less than $textBuffer.height() and it only expands (bad when story has huge list of choices)
     $textBuffer.height(0);
@@ -97,12 +106,19 @@ function contentReady() {
             if( prevHeight > newHeight ) {
                 $textBuffer.height(newHeight);
             }
+            // Release the min-height lock
+            $scrollContainer.css("min-height", "");
         });
 
+    } else {
+        // Release the min-height lock when not animating
+        $scrollContainer.css("min-height", "");
     }
 }
 
 function prepareForNewPlaythrough(sessionId) {
+
+    isReplaying = true;
 
     $textBuffer = $("#player .hiddenBuffer .innerText");
     $textBuffer.data("sessionId", sessionId);
@@ -159,7 +175,7 @@ function addTextSection(text)
             var range = $(this).data("range");
             if( range ) {
                 var midOffset = Math.floor(range.start + range.length/2);
-                events.jumpToSource(midOffset);
+                PlayerView.emit("jumpToSource", midOffset);
             }
 
             e.preventDefault();
@@ -246,7 +262,22 @@ function addLongMessage(message, cssClass)
 function addHorizontalDivider()
 {
     if (($textBuffer[0].lastChild == null) || ($textBuffer[0].lastChild.tagName != "HR")) {
-        $textBuffer.append("<hr/>");
+        var $dividerWrapper = $("<div class='turnDivider'></div>");
+        var $hr = $("<hr/>");
+        var $stepBackBtn = $("<div class='turnStepBack' title='Rewind to this point'><span class='icon icon-reply'></span></div>");
+        
+        var turnIndex = $textBuffer.find(".turnDivider").length;
+        $stepBackBtn.data("turnIndex", turnIndex);
+        
+        $stepBackBtn.on("click", function(e) {
+            var idx = $(this).data("turnIndex");
+            PlayerView.emit("stepBackToTurn", idx);
+            e.preventDefault();
+        });
+        
+        $dividerWrapper.append($hr);
+        $dividerWrapper.append($stepBackBtn);
+        $textBuffer.append($dividerWrapper);
     }
 }
 
@@ -273,9 +304,19 @@ function addEvaluationResult(result, error)
 
 function previewStepBack()
 {
-    var $lastDivider = $("#player .innerText.active").find("hr").last();
+    var $lastDivider = $("#player .innerText.active").find(".turnDivider").last();
     $lastDivider.nextAll().remove();
     $lastDivider.remove();
+}
+
+function previewStepBackToTurn(turnIdx)
+{
+    var $dividers = $("#player .innerText.active").find(".turnDivider");
+    var $targetDivider = $dividers.eq(turnIdx);
+    if( $targetDivider.length > 0 ) {
+        $targetDivider.nextAll().remove();
+        $targetDivider.remove();
+    }
 }
 
 function setInstructionPrefix(prefix) {
@@ -299,8 +340,70 @@ function setAnimationEnabled(animEnabled) {
     animationEnabled = animEnabled;
 }
 
-exports.PlayerView = {
-    setEvents: (e) => { events = e; },
+var jsonStory = null;
+var jsonFilePath = null;
+
+function prepareForJsonPlayback(story, filePath) {
+    jsonStory = story;
+    jsonFilePath = filePath;
+
+    $textBuffer = $("#player .innerText.active");
+    $textBuffer.text("");
+    $textBuffer.height(0);
+
+    $("#toolbar .step-back.button").addClass("hidden");
+    $("#toolbar .rewind.button").removeClass("hidden");
+    $("#toolbar .pause-toggle.button").addClass("hidden");
+    $("#toolbar .pathJump").addClass("hidden");
+    $("#toolbar .busySpinner").css("display", "none");
+
+    continueJsonStory(true);
+}
+
+function continueJsonStory(firstTime) {
+    if (!jsonStory) return;
+
+    while (jsonStory.canContinue) {
+        var paragraphText = jsonStory.Continue();
+        var tags = jsonStory.currentTags;
+
+        if (paragraphText && paragraphText.trim().length > 0) {
+            addTextSection(paragraphText);
+        }
+
+        if (tags && tags.length > 0) {
+            addTags(tags);
+        }
+    }
+
+    if (jsonStory.currentChoices && jsonStory.currentChoices.length > 0) {
+        jsonStory.currentChoices.forEach(function(choice) {
+            addChoice({ choice: choice }, function() {
+                jsonStory.ChooseChoiceIndex(choice.index);
+                addHorizontalDivider();
+                contentReady();
+                continueJsonStory(false);
+            });
+        });
+        contentReady();
+    } else {
+        addTerminatingMessage(i18n._("End of story"), "end");
+        contentReady();
+    }
+}
+
+function restartJsonStory() {
+    if (!jsonStory) return;
+
+    $textBuffer = $("#player .innerText.active");
+    $textBuffer.text("");
+    $textBuffer.height(0);
+
+    jsonStory.ResetState();
+    continueJsonStory(true);
+}
+
+exports.PlayerView = Object.assign(PlayerView, {
     contentReady: contentReady,
     prepareForNewPlaythrough: prepareForNewPlaythrough,
     addTextSection: addTextSection,
@@ -313,6 +416,9 @@ exports.PlayerView = {
     addEvaluationResult: addEvaluationResult,
     showSessionView: showSessionView,
     previewStepBack: previewStepBack,
+    previewStepBackToTurn: previewStepBackToTurn,
     setInstructionPrefix: setInstructionPrefix,
-    setAnimationEnabled: setAnimationEnabled
-};  
+    setAnimationEnabled: setAnimationEnabled,
+    prepareForJsonPlayback: prepareForJsonPlayback,
+    restartJsonStory: restartJsonStory
+});  

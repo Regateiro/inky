@@ -1,24 +1,23 @@
+const EventEmitter = require("events");
 const editor = ace.edit("editor");
 const Range = ace.require("ace/range").Range;
 const TokenIterator = ace.require("ace/token_iterator").TokenIterator;
 const language_tools = ace.require("ace/ext/language_tools");
 
 const inkCompleter = require("./inkCompleter.js").inkCompleter;
+const { debug, debugTrace } = require("./debug.js");
 
-var editorMarkers = [];
 var editorAnnotations = [];
+const sessionMarkers = new Map();
 
 // Used when reloading files so that cursor doesn't jump back to the top
 var savedCursorPos = null;
 var savedScrollRow = null;
 
-// Overriden by controller.js
-var events = {
-    change:         () => {},
-    jumpToInclude:  () => {},
-    jumpToSymbol:   () => {},
-    changedLine:    () => {}
-};
+class EditorViewClass extends EventEmitter {
+}
+
+const EditorView = new EditorViewClass();
 
 editor.setShowPrintMargin(false);
 editor.setOptions({
@@ -26,10 +25,12 @@ editor.setOptions({
     enableLiveAutocompletion: true,
 });
 editor.on("change", () => {
-    events.change();
+    debugTrace("ace.editor.change");
+    EditorView.emit("change");
 });
 editor.on("changeSelection", ()=>{
-    events.changedLine(editor.getCursorPosition());
+    debugTrace("ace.editor.changeSelection");
+    EditorView.emit("changedLine", editor.getCursorPosition());
 })
 
 // Exclude language_tools.textCompleter but add the Ink completer
@@ -51,7 +52,7 @@ editor.on("click", function(e){
     if( e.domEvent.altKey ) {
         tryClickCodeLink(e);
     } else {
-        setImmediate(() => events.navigate());
+        setImmediate(() => EditorView.emit("navigate"));
     }
 });
 
@@ -61,14 +62,14 @@ function tryClickCodeLink(event) {
     var searchToken = editor.session.getTokenAt(pos.row, pos.column);
 
     if( searchToken && searchToken.type == "include.filepath" ) {
-        events.jumpToInclude(searchToken.value);
+        EditorView.emit("jumpToInclude", searchToken.value);
         return;
     }
 
     if( searchToken && searchToken.type == "divert.target" ) {
         event.preventDefault();
         var targetPath = searchToken.value;
-        events.jumpToSymbol(targetPath, pos);
+        EditorView.emit("jumpToSymbol", targetPath, pos);
         return;
     }
 }
@@ -125,14 +126,17 @@ function addError(error) {
     });
     editor.getSession().setAnnotations(editorAnnotations);
 
-    var aceClass = "ace-error";
     var markerId = editor.session.addMarker(
         new Range(error.lineNumber-1, 0, error.lineNumber, 0),
         editorClass, 
         "line",
         false
     );
-    editorMarkers.push(markerId);
+    const session = editor.getSession();
+    if (!sessionMarkers.has(session)) {
+        sessionMarkers.set(session, []);
+    }
+    sessionMarkers.get(session).push(markerId);
 }
 
 function setErrors(errors) {
@@ -146,35 +150,98 @@ function clearErrors() {
     editorSession.clearAnnotations();
     editorAnnotations = [];
 
-    for(var i=0; i<editorMarkers.length; i++) {
-        editorSession.removeMarker(editorMarkers[i]);
+    const markers = sessionMarkers.get(editorSession);
+    if (markers) {
+        for(var i=0; i<markers.length; i++) {
+            editorSession.removeMarker(markers[i]);
+        }
+        sessionMarkers.delete(editorSession);
     }
-    editorMarkers = [];
 }
 
-exports.EditorView = {
-    clearErrors: clearErrors,
-    setEvents: (e) => { events = e; },
-    getValue: () => { return editor.getValue(); },
-    setValue: (v) => { editor.setValue(v); },
-    insert: (txt) => editor.insert(txt),
-    gotoLine: (row, col) => { editor.gotoLine(row, col); editor.focus(); },
-    addError: addError,
-    setErrors: setErrors,
+function followSymbol() {
+    var pos = editor.getCursorPosition();
+    var searchToken = editor.session.getTokenAt(pos.row, pos.column);
+
+    if (!searchToken) return;
+
+    if (searchToken.type == "include.filepath") {
+        EditorView.emit("jumpToInclude", searchToken.value);
+        return;
+    }
+
+    if (searchToken.type == "divert.target") {
+        EditorView.emit("jumpToSymbol", searchToken.value, pos);
+        return;
+    }
+}
+
+exports.EditorView = Object.assign(EditorView, {
+    clearErrors: () => {
+        debugTrace("EditorView.clearErrors");
+        clearErrors();
+    },
+    getValue: () => {
+        debugTrace("EditorView.getValue");
+        return editor.getValue();
+    },
+    setValue: (v) => {
+        debugTrace("EditorView.setValue", v ? v.length : 0, "chars");
+        editor.setValue(v);
+    },
+    insert: (txt) => {
+        debugTrace("EditorView.insert", txt ? txt.length : 0, "chars");
+        editor.insert(txt);
+    },
+    gotoLine: (row, col) => {
+        debugTrace("EditorView.gotoLine", row, col);
+        editor.gotoLine(row, col);
+        editor.focus();
+    },
+    addError: (error) => {
+        debugTrace("EditorView.addError", error);
+        addError(error);
+    },
+    setErrors: (errors) => {
+        debugTrace("EditorView.setErrors", errors.length, "errors");
+        setErrors(errors);
+    },
+    followSymbol: () => {
+        debugTrace("EditorView.followSymbol");
+        followSymbol();
+    },
     setFiles: (inkFiles) => {
+        debugTrace("EditorView.setFiles", inkFiles.length, "files");
         inkCompleter.inkFiles = inkFiles;
     },
     showInkFile: (inkFile) => {
-        clearErrors();
+        debugTrace("EditorView.showInkFile", inkFile.filename());
+        const oldSession = editor.getSession();
+        if (oldSession) {
+            const markers = sessionMarkers.get(oldSession);
+            if (markers) {
+                for (var i = 0; i < markers.length; i++) {
+                    oldSession.removeMarker(markers[i]);
+                }
+                sessionMarkers.delete(oldSession);
+            }
+            oldSession.clearAnnotations();
+        }
+        editorAnnotations = [];
         editor.setSession(inkFile.getAceSession());
         editor.focus();
     },
-    focus: () => { editor.focus(); },
+    focus: () => {
+        debugTrace("EditorView.focus");
+        editor.focus();
+    },
     saveCursorPos: () => { 
+        debugTrace("EditorView.saveCursorPos");
         savedCursorPos = editor.getCursorPosition(); 
         savedScrollRow = editor.getFirstVisibleRow(); 
     },
     restoreCursorPos: () => { 
+        debugTrace("EditorView.restoreCursorPos", savedCursorPos, savedScrollRow);
         if( savedCursorPos ) {
             editor.moveCursorToPosition(savedCursorPos); 
             editor.scrollToRow(savedScrollRow);
@@ -184,9 +251,14 @@ exports.EditorView = {
         return editor.getCursorPosition();
     },
     setAutoCompleteDisabled: (autoCompleteDisabled) => {
+        debugTrace("EditorView.setAutoCompleteDisabled", autoCompleteDisabled);
         editor.setOptions({
             enableBasicAutocompletion: !autoCompleteDisabled,
             enableLiveAutocompletion: !autoCompleteDisabled
         });
     },
-};
+    resize: () => {
+        debugTrace("EditorView.resize");
+        editor.resize();
+    },
+});

@@ -1,3 +1,4 @@
+const EventEmitter = require("events");
 const $ = window.jQuery = require('./jquery-2.2.3.min.js');
 const ipc = require("electron").ipcRenderer;
 require("./util.js");
@@ -10,7 +11,7 @@ const InkMode = require("./ace-ink-mode/ace-ink.js").InkMode;
 const i18n = require("./i18n.js");
 
 var expressionViews = [];
-var events = {};
+var expressionWatchEvents = new EventEmitter();
 
 function ExpressionWatchView() {
     this.$expression = $(`
@@ -74,7 +75,7 @@ function ExpressionWatchView() {
     this.editor.container.style.lineHeight = 2; // em? 2x? or what?
 
     this.editor.on("change", () => {
-        events.change();
+        expressionWatchEvents.emit("change");
     });
 
     // Hook up remove button
@@ -82,7 +83,7 @@ function ExpressionWatchView() {
         this.$expression.remove();
         expressionViews.remove(this);
         event.preventDefault();
-        events.change();
+        expressionWatchEvents.emit("change");
     });
 }
 
@@ -94,9 +95,7 @@ ExpressionWatchView.prototype.focus = function() {
     return this.editor.focus();
 }
 
-ExpressionWatchView.setEvents = (e) => {
-    events = e;
-}
+ExpressionWatchView.eventEmitter = expressionWatchEvents;
 
 ExpressionWatchView.numberOfExpressions = () => expressionViews.length;
 ExpressionWatchView.getExpression = (i) => expressionViews[i].editor.getValue();
@@ -106,7 +105,39 @@ ExpressionWatchView.totalHeight = () => $(".expressionWatch").height();
 ipc.on("add-watch-expression", () => {
     var expressionWatchView = new ExpressionWatchView();
     expressionViews.push(expressionWatchView);
-    events.change();
+    expressionWatchEvents.emit("change");
 });
+
+$(document).ready(function() {
+    $("#player .variableQueryBtn").on("click", function() {
+        var queryText = $("#player .variableQueryInput").val().trim();
+        if( queryText.length > 0 ) {
+            expressionWatchEvents.emit("queryVariable", queryText);
+        }
+    });
+
+    $("#player .variableQueryInput").on("keyup", function(event) {
+        if( event.keyCode === 13 ) {
+            var queryText = $(this).val().trim();
+            if( queryText.length > 0 ) {
+                expressionWatchEvents.emit("queryVariable", queryText);
+            }
+        }
+    });
+
+    $("#player .variableListBtn").on("click", function() {
+        expressionWatchEvents.emit("listVariables");
+    });
+});
+
+ExpressionWatchView.showVariableResult = function(text) {
+    var $result = $("#player .variableQueryResult");
+    $result.text(text);
+    $result.removeClass("hidden");
+};
+
+ExpressionWatchView.hideVariableResult = function() {
+    $("#player .variableQueryResult").addClass("hidden");
+};
 
 exports.ExpressionWatchView = ExpressionWatchView;

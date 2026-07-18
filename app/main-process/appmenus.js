@@ -15,6 +15,18 @@ let theme = null;
 let zoom = null;
 let animationEnabled = null;
 let autoCompleteDisabled = null; // default on
+let editorVisible = true;
+let playerVisible = true;
+let variableQueryVisible = false;
+
+let projectState = {
+    hasUnsavedChanges: false,
+    isReady: false,
+    hasProject: false,
+    hasActiveFile: false,
+    activeFileIsMainInk: true,
+};
+let currentFilename = null;
 
 
 let callbacks = {
@@ -180,7 +192,22 @@ function refresh() {
                 {
                     label: i18n._('New Included Ink File'),
                     accelerator: 'CmdOrCtrl+Alt+N',
+                    enabled: projectState.hasProject && callbacks.isFocusedWindow,
                     click: callbacks.newInclude
+                },
+                {
+                    type: 'separator'
+                },
+                {
+                    label: currentFilename ? i18n._('Rename') + ' ' + currentFilename : i18n._('Rename Current File'),
+                    accelerator: 'CmdOrCtrl+Shift+R',
+                    enabled: projectState.hasProject && !projectState.activeFileIsMainInk && callbacks.isFocusedWindow,
+                    click: callbacks.renameFile
+                },
+                {
+                    label: currentFilename ? i18n._('Delete') + ' ' + currentFilename : i18n._('Delete Current File'),
+                    enabled: projectState.hasProject && !projectState.activeFileIsMainInk && callbacks.isFocusedWindow,
+                    click: callbacks.deleteFile
                 },
                 {
                     type: 'separator'
@@ -191,6 +218,11 @@ function refresh() {
                     click: callbacks.open
                 },
                 {
+                    label: i18n._('Open JSON...'),
+                    accelerator: 'CmdOrCtrl+Shift+O',
+                    click: callbacks.openJson
+                },
+                {
                     label: i18n._('Open Recent'),
                     id: "recent",
                     submenu: recentFilesSubmenu
@@ -199,9 +231,9 @@ function refresh() {
                     type: 'separator'
                 },
                 {
-                    label: i18n._('Save Project'),
+                    label: currentFilename ? i18n._('Save') + ' ' + currentFilename : i18n._('Save Project'),
                     accelerator: 'CmdOrCtrl+S',
-                    enabled: callbacks.isFocusedWindow,
+                    enabled: projectState.hasUnsavedChanges && callbacks.isFocusedWindow,
                     click: callbacks.save
                 },
                 {
@@ -210,18 +242,18 @@ function refresh() {
                 {
                     label: i18n._('Export to JSON...'),
                     accelerator: 'CmdOrCtrl+Shift+S',
-                    enabled: callbacks.isFocusedWindow,
+                    enabled: projectState.isReady && callbacks.isFocusedWindow,
                     click: callbacks.exportJson
                 },
                 {
                     label: i18n._('Export for web...'),
-                    enabled: callbacks.isFocusedWindow,
+                    enabled: projectState.isReady && callbacks.isFocusedWindow,
                     click: callbacks.exportForWeb
                 },
                 {
                     label: i18n._('Export story.js only...'),
                     accelerator: 'CmdOrCtrl+Alt+S',
-                    enabled: callbacks.isFocusedWindow,
+                    enabled: projectState.isReady && callbacks.isFocusedWindow,
                     click: callbacks.exportJSOnly
                 },
                 {
@@ -274,6 +306,12 @@ function refresh() {
                     type: 'separator'
                 },
                 {
+                    label: i18n._('Find in Project...'),
+                    accelerator: 'CmdOrCtrl+Shift+F',
+                    enabled: callbacks.isFocusedWindow,
+                    click: callbacks.findInProject
+                },
+                {
                     label: i18n._('Useful Keyboard Shortcuts'),
                     enabled: callbacks.isFocusedWindow,
                     click: callbacks.keyboardShortcuts
@@ -320,8 +358,89 @@ function refresh() {
                     type: "checkbox",
                     checked: animationEnabled,
                     click: callbacks.toggleAnimation
+                },
+                {
+                    type: 'separator'
+                },
+                {
+                    label: i18n._("Toggle Editor"),
+                    type: "checkbox",
+                    checked: editorVisible,
+                    click: (item, focusedWindow) => {
+                        editorVisible = item.checked;
+                        if (focusedWindow)
+                            focusedWindow.webContents.send('toggle-editor', editorVisible);
+                    }
+                },
+                {
+                    label: i18n._("Toggle Player"),
+                    type: "checkbox",
+                    checked: playerVisible,
+                    click: (item, focusedWindow) => {
+                        playerVisible = item.checked;
+                        if (focusedWindow)
+                            focusedWindow.webContents.send('toggle-player', playerVisible);
+                    }
+                },
+                {
+                    label: i18n._("Toggle Variable Query"),
+                    type: "checkbox",
+                    checked: variableQueryVisible,
+                    click: (item, focusedWindow) => {
+                        variableQueryVisible = item.checked;
+                        if (focusedWindow)
+                            focusedWindow.webContents.send('toggle-variable-query', variableQueryVisible);
+                    }
+                },
+                {
+                    type: 'separator'
+                },
+                {
+                    label: i18n._("Pause Compilation"),
+                    type: "checkbox",
+                    checked: false,
+                    click: (item, focusedWindow) => {
+                        if (focusedWindow)
+                            focusedWindow.webContents.send('toggle-pause', item.checked);
+                    }
                 }
 
+            ]
+        },
+        {
+            label: i18n._('&Navigate'),
+            submenu: [
+                {
+                    label: i18n._('Next File'),
+                    accelerator: 'Ctrl+Tab',
+                    click: callbacks.nextFile
+                },
+                {
+                    label: i18n._('Previous File'),
+                    accelerator: 'Ctrl+Shift+Tab',
+                    click: callbacks.prevFile
+                },
+                {
+                    type: 'separator'
+                },
+                {
+                    label: i18n._('Back'),
+                    accelerator: 'CmdOrCtrl+Alt+Left',
+                    click: callbacks.navigateBack
+                },
+                {
+                    label: i18n._('Forward'),
+                    accelerator: 'CmdOrCtrl+Alt+Right',
+                    click: callbacks.navigateForward
+                },
+                {
+                    type: 'separator'
+                },
+                {
+                    label: i18n._('Follow Symbol'),
+                    accelerator: 'CmdOrCtrl+Alt+Return',
+                    click: callbacks.followSymbol
+                },
             ]
         },
         {
@@ -503,6 +622,11 @@ exports.AppMenus = {
     setZoom : (z) => zoom = z,
     setAnimationEnabled : (e) => animationEnabled = e,
     setAutoCompleteDisabled : (e) => autoCompleteDisabled = e,
+    setEditorVisible : (v) => editorVisible = v,
+    setPlayerVisible : (v) => playerVisible = v,
+    setVariableQueryVisible : (v) => variableQueryVisible = v,
     setCustomSnippetMenus : (snippets) => {customInkSnippets = snippets},
+    setCurrentFilename : (filename) => { currentFilename = filename },
+    setProjectState : (state) => { projectState = state; },
     refresh : refresh
 }
