@@ -13,3 +13,4 @@ app/renderer/documentation/
 *.AppImage
 AppImage
 .DS_Store
+node-env/
