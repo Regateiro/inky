@@ -767,7 +767,7 @@ test.describe('variable query', () => {
     await window.waitForSelector('#editor', { state: 'attached' });
     await window.waitForTimeout(1000);
 
-    await setEditorContent(window, 'VAR myVar = 5\nHello World!');
+    await setEditorContent(window, 'VAR myVar = 5\nVAR anotherVar = "test"\nHello World!');
     await waitForCompilation(window);
 
     await electronApp.evaluate(({ BrowserWindow }) => {
@@ -776,12 +776,14 @@ test.describe('variable query', () => {
     });
     await window.waitForTimeout(500);
 
-    // Click the List All button - just verify it doesn't crash
     await window.locator('.variableListBtn').click();
-    await window.waitForTimeout(2000);
+    await window.waitForTimeout(5000);
+
+    const variableQueryResult = window.locator('.variableQueryResult');
+    await expect(variableQueryResult).toBeVisible();
     
-    // The test passes if we get here without errors
-    expect(true).toBe(true);
+    const resultText = await variableQueryResult.textContent();
+    expect(resultText).toContain('myVar');
   });
 
   test('closes variable query panel', async () => {

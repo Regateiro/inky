@@ -207,20 +207,56 @@ function compile(compileInstruction, requester) {
 
             // Issues
             if( jsonResponse.issues !== undefined ) {
+                console.log("Got issues:", jsonResponse.issues);
                 for(let issue of jsonResponse.issues) {
                     let issueMatches = issue.match(issueRegex);
                     if(issueMatches === null){ //falback if regexp fails
-                        inkErrors.push({
-                            type: "RUNTIME ERROR",
-                            filename: "",
-                            lineNumber: 0,
-                            message: issue
-                        });
+                        if( session.evaluatingExpression ) {
+                            // Store the error for the current expression
+                            if (!session.expressionResults) session.expressionResults = [];
+                            session.expressionResults.push({ error: issue });
+                            
+                            // Move to next expression
+                            session.evaluatingExpressions.shift();
+                            if (session.evaluatingExpressions.length > 0) {
+                                console.log("Sending next expression after error:", session.evaluatingExpressions[0]);
+                                session.process.stdin.write(`${session.evaluatingExpressions[0]}\n`);
+                            } else {
+                                // All expressions done, send results
+                                console.log("All expressions done after error, sending results:", session.expressionResults.length);
+                                session.evaluatingExpression = false;
+                                requester.send('play-evaluated-expressions', session.expressionResults, sessionId);
+                                session.expressionResults = [];
+                            }
+                        } else {
+                            inkErrors.push({
+                                type: "RUNTIME ERROR",
+                                filename: "",
+                                lineNumber: 0,
+                                message: issue
+                            });
+                        }
                         continue;
                     }
                     let msg = issueMatches[6].trim();
                     if( session.evaluatingExpression ) {
-                        requester.send('play-evaluated-expression-error', msg, sessionId);
+                        console.log("Processing expression error:", msg, "remaining expressions:", session.evaluatingExpressions.length);
+                        // Store the error for the current expression
+                        if (!session.expressionResults) session.expressionResults = [];
+                        session.expressionResults.push({ error: msg });
+                        
+                        // Move to next expression
+                        session.evaluatingExpressions.shift();
+                        if (session.evaluatingExpressions.length > 0) {
+                            console.log("Sending next expression after error:", session.evaluatingExpressions[0]);
+                            session.process.stdin.write(`${session.evaluatingExpressions[0]}\n`);
+                        } else {
+                            // All expressions done, send results
+                            console.log("All expressions done after error, sending results:", session.expressionResults.length);
+                            session.evaluatingExpression = false;
+                            requester.send('play-evaluated-expressions', session.expressionResults, sessionId);
+                            session.expressionResults = [];
+                        }
                     } else {
                         inkErrors.push({
                             type: issueMatches[1],
@@ -258,9 +294,17 @@ function compile(compileInstruction, requester) {
 
             // Input prompt
             else if( jsonResponse.needInput ) {
-                if( session.evaluatingExpression )
-                    session.evaluatingExpression = false;
-                else if( session.listingVariables )
+                if( session.evaluatingExpression ) {
+                    // Only send results if we've finished processing all expressions
+                    if (!session.evaluatingExpressions || session.evaluatingExpressions.length === 0) {
+                        session.evaluatingExpression = false;
+                        // Send any remaining results
+                        if (session.expressionResults && session.expressionResults.length > 0) {
+                            requester.send('play-evaluated-expressions', session.expressionResults, sessionId);
+                            session.expressionResults = [];
+                        }
+                    }
+                } else if( session.listingVariables )
                     session.listingVariables = false;
                 // else if( session.justRequestedDebugSource )
                 //     session.justRequestedDebugSource = false;
@@ -270,6 +314,7 @@ function compile(compileInstruction, requester) {
             
             // DebugSource and expression result
             else if( jsonResponse.cmdOutput !== undefined ) {
+                console.log("Got cmdOutput:", jsonResponse.cmdOutput);
 
                 let debugSourceMatches = jsonResponse.cmdOutput.match(debugSourceRegex);
                 if( debugSourceMatches ) {
@@ -279,8 +324,23 @@ function compile(compileInstruction, requester) {
                         filename: debugSourceMatches[3]
                     });
                 } else if( session.evaluatingExpression ) {
-                    session.evaluatingExpression = false;
-                    requester.send('play-evaluated-expression', jsonResponse.cmdOutput, sessionId);
+                    console.log("Processing expression result, remaining expressions:", session.evaluatingExpressions.length);
+                    // Store the result for the current expression
+                    if (!session.expressionResults) session.expressionResults = [];
+                    session.expressionResults.push({ result: jsonResponse.cmdOutput });
+                    
+                    // Move to next expression
+                    session.evaluatingExpressions.shift();
+                    if (session.evaluatingExpressions.length > 0) {
+                        console.log("Sending next expression:", session.evaluatingExpressions[0]);
+                        session.process.stdin.write(`${session.evaluatingExpressions[0]}\n`);
+                    } else {
+                        // All expressions done, send results
+                        console.log("All expressions done, sending results:", session.expressionResults.length);
+                        session.evaluatingExpression = false;
+                        requester.send('play-evaluated-expressions', session.expressionResults, sessionId);
+                        session.expressionResults = [];
+                    }
                 } else if( session.listingVariables ) {
                     session.listingVariables = false;
                     requester.send('return-variables-list', jsonResponse.cmdOutput, sessionId);
@@ -380,13 +440,23 @@ ipc.on("play-continue-with-choice-number", (event, choiceNumber, sessionId) => {
     }
 });
 
-ipc.on("evaluate-expression", (event, expressionText, sessionId) => {
+ipc.on("evaluate-expressions", (event, expressionTexts, sessionId) => {
+    console.log("evaluate-expressions IPC received:", expressionTexts, sessionId);
     var session = sessions[sessionId];
     if( session ) {
         if( session.process ) {
+            session.evaluatingExpressions = expressionTexts.slice(); // Copy the array
             session.evaluatingExpression = true;
-            session.process.stdin.write(`${expressionText}\n`);
+            session.expressionResults = []; // Initialize results array
+            console.log("Starting evaluation of", expressionTexts.length, "expressions");
+            // Send the first expression
+            if (session.evaluatingExpressions.length > 0) {
+                console.log("Sending first expression:", session.evaluatingExpressions[0]);
+                session.process.stdin.write(`${session.evaluatingExpressions[0]}\n`);
+            }
         }
+    } else {
+        console.log("No session found for", sessionId);
     }
 });
 

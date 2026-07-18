@@ -215,13 +215,24 @@ function getRuntimePathInSource(runtimePath, callback) {
     locationInSourceCallbackObj = { callback: callback, sessionId: currentPlaySessionId };
 }
 
-function evaluateExpression(expressionText, callback) {
+function evaluateExpressions(expressionTexts, callback) {
+    console.log("evaluateExpressions called with:", expressionTexts);
     if (!currentPlaySessionId) {
-        callback(null, "No active compilation session. Please wait for the story to compile.");
+        console.log("No currentPlaySessionId");
+        // Return an array with a single error result
+        const errorResults = [{ error: "No active compilation session. Please wait for the story to compile." }];
+        callback(errorResults);
         return;
     }
-    ipc.send("evaluate-expression", expressionText, currentPlaySessionId);
-    expressionEvaluationObj = { callback: callback,  sessionId: currentPlaySessionId };
+    console.log("Using sessionId:", currentPlaySessionId);
+    // Ensure we always work with an array
+    if (!Array.isArray(expressionTexts)) {
+        expressionTexts = [expressionTexts];
+    }
+    console.log("Sending evaluate-expressions IPC");
+    ipc.send("evaluate-expressions", expressionTexts, currentPlaySessionId);
+    expressionEvaluationObj = { callback: callback, sessionId: currentPlaySessionId, expressions: expressionTexts, results: [], errors: [] };
+    console.log("Set expressionEvaluationObj");
 }
 
 // --------------------------------------------------------
@@ -412,19 +423,11 @@ ipc.on("return-location-from-source", (event, fromSessionId, locationInfo) => {
     }
 });
 
-ipc.on("play-evaluated-expression", (event, textResult, fromSessionId) => {
+ipc.on("play-evaluated-expressions", (event, results, fromSessionId) => {
     if( fromSessionId == expressionEvaluationObj.sessionId && expressionEvaluationObj ) {
         var callback = expressionEvaluationObj.callback;
         expressionEvaluationObj = null;
-        callback(textResult);
-    }
-});
-
-ipc.on("play-evaluated-expression-error", (event, errorMessage, fromSessionId) => {
-    if( fromSessionId == expressionEvaluationObj.sessionId && expressionEvaluationObj ) {
-        var callback = expressionEvaluationObj.callback;
-        expressionEvaluationObj = null;
-        callback(null, errorMessage);
+        callback(results);
     }
 });
 
@@ -505,7 +508,7 @@ exports.LiveCompiler = Object.assign(LiveCompiler, {
     listVariables: listVariables,
     getLocationInSource: getLocationInSource,
     getRuntimePathInSource: getRuntimePathInSource,
-    evaluateExpression: evaluateExpression,
+    evaluateExpression: evaluateExpressions,
     getStats: getStats,
     removeTempFile: removeTempFile,
     pause: pause,
