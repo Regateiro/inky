@@ -325,9 +325,56 @@ ExpressionWatchView.eventEmitter.on("queryVariable", (varName) => {
 
 ExpressionWatchView.eventEmitter.on("listVariables", () => {
     debugTrace("ExpressionWatchView.listVariables");
-    LiveCompiler.listVariables((variablesText) => {
-        ExpressionWatchView.showVariableResult(variablesText);
+    debug("listVariables: starting");
+    
+    // Get all variables from all files
+    const inkCompleter = require("./inkCompleter.js").inkCompleter;
+    debug("listVariables: inkCompleter.inkFiles.length =", inkCompleter.inkFiles.length);
+    
+    const allVariables = new Set();
+    inkCompleter.inkFiles.forEach(file => {
+        const vars = file.symbols.getCachedVariables();
+        debug("listVariables: file", file.filename(), "has", vars.size, "variables");
+        vars.forEach(v => allVariables.add(v));
     });
+    
+    debug("listVariables: total variables found:", allVariables.size);
+    
+    if (allVariables.size === 0) {
+        debug("listVariables: no variables found, showing message");
+        ExpressionWatchView.showVariableResult("No variables found in the project.");
+        return;
+    }
+    
+    // Query each variable sequentially and collect results
+    const results = [];
+    const varArray = Array.from(allVariables).sort();
+    
+    function queryNext(index) {
+        if (index >= varArray.length) {
+            // All queries complete, display results
+            debug("listVariables: all queries complete, showing results");
+            ExpressionWatchView.showVariableResult(results.join("\n"));
+            return;
+        }
+        
+        const varName = varArray[index];
+        debug("listVariables: querying variable:", varName);
+        
+        LiveCompiler.evaluateExpression(varName, (result, error) => {
+            debug("listVariables: got result for", varName, "result:", result, "error:", error);
+            if (error) {
+                results.push(`${varName} = <error: ${error}>`);
+            } else {
+                results.push(`${varName} = ${result}`);
+            }
+            // Query next variable
+            queryNext(index + 1);
+        });
+    }
+    
+    // Start querying from the first variable
+    queryNext(0);
 });
 
 ToolbarView.on("toggleSidebar", (id, buttonId) => {
