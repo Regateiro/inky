@@ -333,6 +333,12 @@ ExpressionWatchView.eventEmitter.on("listVariables", () => {
     
     const allVariables = new Set();
     inkCompleter.inkFiles.forEach(file => {
+        // Ensure symbols are parsed before getting variables
+        try {
+            file.symbols.parse();
+        } catch(e) {
+            debug("listVariables: failed to parse symbols for", file.filename(), e);
+        }
         const vars = file.symbols.getCachedVariables();
         debug("listVariables: file", file.filename(), "has", vars.size, "variables");
         vars.forEach(v => allVariables.add(v));

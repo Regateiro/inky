@@ -106,7 +106,7 @@ $(document).ready(() => {
 
     // Mac-style return-to-rename: pressing Return on a selected file starts rename
     $(document).on("keydown", function(e) {
-        if( e.key === "F2" || (e.key === "Enter" && !$(e.target).is("#toolbar .pathJumpInput") && $fileNavWrapper.find(".nav-group-item.active").length > 0) ) {
+        if( e.key === "F2" || (e.key === "Enter" && !$(e.target).is("#toolbar .pathJumpInput") && !$(e.target).is("#player .variableQueryInput") && $fileNavWrapper.find(".nav-group-item.active").length > 0) ) {
             var $active = $fileNavWrapper.find(".nav-group-item.active");
             if( $active.length > 0 ) {
                 var fileIdStr = $active.attr("data-file-id");

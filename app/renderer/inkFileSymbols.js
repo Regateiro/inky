@@ -306,18 +306,22 @@ InkFileSymbols.prototype.getLastIncludeRow = function() {
 }
 
 InkFileSymbols.prototype.getCachedDivertTargets = function() {
+    if( this.dirty ) this.parse();
     return this.divertTargets;
 }
 
 InkFileSymbols.prototype.getCachedVariables = function() {
+    if( this.dirty ) this.parse();
     return this.variables;
 }
 
 InkFileSymbols.prototype.getCachedExternals = function() {
+    if( this.dirty ) this.parse();
     return this.externals;
 }
 
 InkFileSymbols.prototype.getCachedVocabWords = function() {
+    if( this.dirty ) this.parse();
     return this.vocabWords;
 }
 
