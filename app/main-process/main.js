@@ -9,6 +9,10 @@ const {Inklecate} = require("./inklecate.js");
 const { fstat } = require('original-fs');
 const fs = require("fs");
 
+if (process.argv.includes('--disable-gpu')) {
+    app.disableHardwareAcceleration();
+}
+
 
 function inkJSNeedsUpdating() {
     return false;
@@ -68,7 +72,7 @@ ipcMain.handle("try-close", async (event) =>{
 })
 
 app.on('will-finish-launching', function () {
-    app.on("open-file", function (event, path) {
+app.on("open-file", async function (event, path) {
         ProjectWindow.open(path);
         event.preventDefault();
     });
@@ -88,12 +92,17 @@ app.on("open-file", function (event, path) {
     // Drag and drop onto app while it's already open
     else {
 
-        // See if this root file is already open in an existing window
-        let existingWin = ProjectWindow.withMainkInkPath(path);
-        if( existingWin ) {
-            existingWin.browserWindow.focus();
-            existingWin.browserWindow.webContents.send('open-main-ink');
-        } else {
+        // See if this file is open in an existing project window
+        let handled = false;
+        for (let win of ProjectWindow.all()) {
+            if (win.switchToFile(path)) {
+                win.browserWindow.focus();
+                handled = true;
+                break;
+            }
+        }
+
+        if (!handled) {
             ProjectWindow.open(path);       
         }
     }
@@ -111,6 +120,11 @@ ipcMain.on("project-cancelled-close", (event) => {
     isQuitting = false;
 });
 
+ipcMain.on("update-current-filename", (event, filename) => {
+    AppMenus.setCurrentFilename(filename);
+    AppMenus.refresh();
+});
+
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
@@ -123,6 +137,7 @@ app.on('ready', function () {
     });
     
     AppMenus.setCallbacks({
+        get isFocusedWindow() { return !!ProjectWindow.focused(); },
         new: () => {
             ProjectWindow.createEmpty();
         },
@@ -130,9 +145,31 @@ app.on('ready', function () {
             var win = ProjectWindow.focused();
             if (win) win.newInclude();
         },
+        renameFile: () => {
+            var win = ProjectWindow.focused();
+            if (win) win.renameFile();
+        },
+        deleteFile: () => {
+            var win = ProjectWindow.focused();
+            if (win) win.deleteFile();
+        },
         open: () => {
             console.log("Test!")
             ProjectWindow.open();
+        },
+        openJson: () => {
+            var win = ProjectWindow.focused();
+            var targetWindow = win ? win.browserWindow : ProjectWindow.all()[0]?.browserWindow;
+            if (!targetWindow) return;
+            dialog.showOpenDialog(targetWindow, {
+                title: i18n._("Open JSON Story"),
+                filters: [{ name: "JSON Files", extensions: ["json"] }],
+                properties: ["openFile"]
+            }).then(result => {
+                if (result.canceled || result.filePaths.length === 0) return;
+                var filePath = result.filePaths[0];
+                targetWindow.webContents.send("open-json-file", filePath);
+            });
         },
         clearRecent: () => {
             ProjectWindow.clearRecentFiles();
@@ -165,6 +202,9 @@ app.on('ready', function () {
         },
         gotoAnything: (item, focusedWindow) => {
             focusedWindow.webContents.send("goto-anything");
+        },
+        findInProject: (item, focusedWindow) => {
+            if (focusedWindow) focusedWindow.webContents.send("find-in-project");
         },
         addWatchExpression: (item, focusedWindow) => {
             focusedWindow.webContents.send("add-watch-expression");
@@ -229,6 +269,21 @@ app.on('ready', function () {
                 eachWindow.browserWindow.webContents.send("set-autocomplete-disabled", autoCompleteDisabled);
             }
         },
+        nextFile: (item, focusedWindow) => {
+            if (focusedWindow) focusedWindow.webContents.send("next-file");
+        },
+        prevFile: (item, focusedWindow) => {
+            if (focusedWindow) focusedWindow.webContents.send("prev-file");
+        },
+        navigateBack: (item, focusedWindow) => {
+            if (focusedWindow) focusedWindow.webContents.send("navigate-back");
+        },
+        navigateForward: (item, focusedWindow) => {
+            if (focusedWindow) focusedWindow.webContents.send("navigate-forward");
+        },
+        followSymbol: (item, focusedWindow) => {
+            if (focusedWindow) focusedWindow.webContents.send("follow-symbol");
+        },
         insertSnippet: (focussedWindow, snippet) => {
             if( focussedWindow )
             focussedWindow.webContents.send('insertSnippet', snippet);
@@ -240,7 +295,6 @@ app.on('ready', function () {
         }
     });
     
-    console.log("Testing!")
     AppMenus.setRecentFiles(ProjectWindow.getRecentFiles());
     AppMenus.setTheme(ProjectWindow.getViewSettings().theme);
     AppMenus.setZoom(ProjectWindow.getViewSettings().zoom);
@@ -248,14 +302,11 @@ app.on('ready', function () {
     AppMenus.setAutoCompleteDisabled(ProjectWindow.getViewSettings().autoCompleteDisabled)
 
     AppMenus.refresh();
-    ProjectWindow.setEvents({
+    
+    // Set global event handlers (for events that affect all windows)
+    ProjectWindow.setGlobalEventHandlers({
         onRecentFilesChanged: (recentFiles) => {
             AppMenus.setRecentFiles(recentFiles);
-            AppMenus.refresh();
-        },
-        onProjectSettingsChanged: (settings) => {
-            settings = settings || {};
-            AppMenus.setCustomSnippetMenus(settings.customInkSnippets || []);
             AppMenus.refresh();
         },
         onViewSettingsChanged: (viewSettings) => {
@@ -266,6 +317,82 @@ app.on('ready', function () {
             AppMenus.refresh();
         }
     });
+
+    // Helper to set per-window event handlers for a specific window
+    function setupWindowEventHandlers(win) {
+        ProjectWindow.setPerWindowEventHandlers(win, {
+            onProjectSettingsChanged: (settings) => {
+                // Only update menus if this window is currently focused
+                if( ProjectWindow.focused() === win ) {
+                    settings = settings || {};
+                    AppMenus.setCustomSnippetMenus(settings.customInkSnippets || []);
+                    AppMenus.refresh();
+                }
+            },
+            onProjectStateFocused: (focusedWin) => {
+                AppMenus.setProjectState(focusedWin.projectState);
+                if( focusedWin.projectState.currentFilename )
+                    AppMenus.setCurrentFilename(focusedWin.projectState.currentFilename);
+                AppMenus.refresh();
+            }
+        });
+    }
+
+    // Set up handlers for existing windows
+    ProjectWindow.all().forEach(setupWindowEventHandlers);
+
+    // Watch for new windows being created
+    const originalCreateEmpty = ProjectWindow.createEmpty;
+    ProjectWindow.createEmpty = function() {
+        const win = originalCreateEmpty();
+        setupWindowEventHandlers(win);
+        return win;
+    };
+
+    const originalOpen = ProjectWindow.open;
+    ProjectWindow.open = function(filePath) {
+        const win = originalOpen(filePath);
+        if( win ) setupWindowEventHandlers(win);
+        return win;
+    };
+
+    // Handle window blur - reset menus only if no window is focused
+    function handleWindowBlur() {
+        setTimeout(() => {
+            const focused = ProjectWindow.focused();
+            if( focused ) return;
+            AppMenus.setProjectState({
+                hasUnsavedChanges: false,
+                isReady: false,
+                hasProject: false,
+                hasActiveFile: false,
+                activeFileIsMainInk: true,
+            });
+            AppMenus.setCurrentFilename(null);
+            AppMenus.setCustomSnippetMenus([]);
+            AppMenus.refresh();
+        }, 0);
+    }
+
+    // Attach blur handler to all existing windows
+    ProjectWindow.all().forEach(win => {
+        win.browserWindow.on("blur", handleWindowBlur);
+    });
+
+    // Watch for new windows to attach blur handler
+    const origCreateEmpty = ProjectWindow.createEmpty;
+    ProjectWindow.createEmpty = function() {
+        const win = origCreateEmpty();
+        win.browserWindow.on("blur", handleWindowBlur);
+        return win;
+    };
+
+    const origOpen = ProjectWindow.open;
+    ProjectWindow.open = function(filePath) {
+        const win = origOpen(filePath);
+        if( win ) win.browserWindow.on("blur", handleWindowBlur);
+        return win;
+    };
 
     // Windows passed file to open on command line?
     if (process.platform == "win32" && process.argv.length > 1 && !pendingPathToOpen) {
@@ -310,6 +437,12 @@ app.on('ready', function () {
 
     // Debug
     //w.openDevTools();
+});
+
+ipcMain.on("project-state-changed", (event, state) => {
+    AppMenus.setProjectState(state);
+    AppMenus.setCurrentFilename(state.currentFilename);
+    AppMenus.refresh();
 });
 
 function finalQuit() {
