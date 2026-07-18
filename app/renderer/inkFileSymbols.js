@@ -129,6 +129,7 @@ InkFileSymbols.prototype.parse = function() {
                 switch (tok.type){
                     case "external.declaration.name":
                         externals.add(symbolName)
+                        break;
                     default:
                         variables.add(symbolName);
                 }

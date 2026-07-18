@@ -72,11 +72,6 @@ ipcMain.handle("try-close", async (event) =>{
 })
 
 app.on('will-finish-launching', function () {
-app.on("open-file", async function (event, path) {
-        ProjectWindow.open(path);
-        event.preventDefault();
-    });
-
 });
 
 let isQuitting = false;
@@ -399,7 +394,7 @@ app.on('ready', function () {
         for (let i = 1; i < process.argv.length; i++) {
             var arg = process.argv[i].toLowerCase();
             if (arg.endsWith(".ink")) {
-                pendingPathToOpen = process.argv[1];
+                pendingPathToOpen = process.argv[i];
                 break;
             }
         }

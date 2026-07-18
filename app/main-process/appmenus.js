@@ -107,7 +107,7 @@ function refresh() {
     
     // Remember how many built in menu items we have so we can
     // remove any custom ones when refreshing them.
-    inkMenuOriginalCount = inkMenu.submenu.length;
+    let inkMenuOriginalCount = inkMenu.submenu.length;
 
     // Recursively convert our settings format into the Electron template menu format.
     // Very similar, but we rename things a bit and turn "ink" into a callback.

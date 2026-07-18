@@ -12,6 +12,7 @@ var currentPlaySessionId = null;
 var currentExportSessionId = null;
 var currentStatsSessionId = null;
 var exportCompleteCallback = null;
+var statsCompleteCallback = null;
 
 var lastEditorChange = null;
 var reloadPending = false;

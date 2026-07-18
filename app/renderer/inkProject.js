@@ -35,7 +35,7 @@ function InkProject(mainInkFilePath) {
     this.inkMode = new InkMode("");
 
     this.mainInk = null;
-    this.mainInk = this.createInkFile(mainInkFilePath || null, isBrandNew = mainInkFilePath === undefined);
+    this.mainInk = this.createInkFile(mainInkFilePath || null, mainInkFilePath === undefined);
 
     EditorView.setFiles(this.files);
     this.showInkFile(this.mainInk);
@@ -88,7 +88,7 @@ InkProject.prototype.addNewInclude = function(newIncludePath, addToMainInk) {
 
     // Convert new include path to relative if it's not already
     if( path.isAbsolute(newIncludePath) ) {
-        assert(this.mainInkFile.projectDir, "Main ink needs to be saved before we start loading includes with absolute paths.");
+        assert(this.mainInk.projectDir, "Main ink needs to be saved before we start loading includes with absolute paths.");
         newIncludePath = path.relative(this.mainInk.projectDir, newIncludePath);
     }
 
@@ -99,7 +99,7 @@ InkProject.prototype.addNewInclude = function(newIncludePath, addToMainInk) {
         return null;
     }
 
-    var newIncludeFile = this.createInkFile(newIncludePath || null, isBrandNew = true);
+    var newIncludeFile = this.createInkFile(newIncludePath || null, true);
 
     if( addToMainInk )
         this.mainInk.addIncludeLine(newIncludeFile.relPath);
@@ -158,7 +158,7 @@ InkProject.prototype.refreshIncludes = function() {
             fs.stat(absPath, (err, stats) => {
                 // If it exists, and double check that it hasn't already been created during the async fs.stat
                 if( !!stats && stats.isFile() &&  !_.some(this.files, f => f.relPath == newIncludeRelPath) ) {
-                    let newFile = this.createInkFile(newIncludeRelPath, isBrandNew = false, err => {
+                    let newFile = this.createInkFile(newIncludeRelPath, false, err => {
                         alert(`${i18n._("Failed to load ink file:")} ${err}`);
                         this.files.remove(newFile);
                         this.refreshIncludes();
@@ -257,7 +257,7 @@ InkProject.prototype.startFileWatching = function() {
         if( !existingFile ) {
             console.log("Watch found new file - creating it: "+relPath);
 
-            let newFile = this.createInkFile(newlyFoundAbsFilePath, isBrandNew = false, err => {
+            let newFile = this.createInkFile(newlyFoundAbsFilePath, false, err => {
                 alert(`${i18n._("Failed to load ink file:")} ${err}`);
                 this.files.remove(newFile);
                 this.refreshIncludes();
@@ -651,7 +651,7 @@ InkProject.prototype.showSaveDialog = function() {
 
     function onSave() {
         cleanup();
-        self.save(false, function() {
+        self.save(function() {
             self.closeImmediate();
         });
     }

@@ -11,7 +11,8 @@ process.once("SIGINT", function () {
 });
 // And the exit event shuts down the child.
 process.once("exit", function () {
-    forceQuitCallback();
+    if (forceQuitCallback)
+        forceQuitCallback();
 });
  
 // This is a somewhat ugly approach, but it has the advantage of working
