@@ -197,6 +197,10 @@ function jumpToPath(path, callback) {
 }
 
 function listVariables(callback) {
+    if (!currentPlaySessionId) {
+        callback("No active compilation session. Please wait for the story to compile.");
+        return;
+    }
     ipc.send("list-variables", currentPlaySessionId);
     variablesListCallbackObj = { callback: callback, sessionId: currentPlaySessionId };
 }
@@ -212,6 +216,10 @@ function getRuntimePathInSource(runtimePath, callback) {
 }
 
 function evaluateExpression(expressionText, callback) {
+    if (!currentPlaySessionId) {
+        callback(null, "No active compilation session. Please wait for the story to compile.");
+        return;
+    }
     ipc.send("evaluate-expression", expressionText, currentPlaySessionId);
     expressionEvaluationObj = { callback: callback,  sessionId: currentPlaySessionId };
 }
