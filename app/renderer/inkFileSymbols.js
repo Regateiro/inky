@@ -134,6 +134,18 @@ InkFileSymbols.prototype.parse = function() {
             divertTargets.add(tok.value);
         }
 
+        // LIST
+        else if( tok.type == "list-decl.item" && tok.value.trim().length > 0 ) {
+            // Extract the name from the line
+            var potentialNames = tok.value.match(/\b\w+\b/g);
+            potentialNames.forEach(potentialName => {
+                // Exclude "names" that are only numbers
+                if( !(/^\d*$/.test(potentialName)) ) {
+                    variables.add(potentialName);
+                }
+            });
+        }
+
         // INCLUDE
         else if( tok.type.indexOf("include.filepath") != -1 && tok.value.trim().length > 0 ) {
             // Normalize path when adding include
