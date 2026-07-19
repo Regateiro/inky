@@ -776,12 +776,17 @@ test.describe('variable query', () => {
     });
     await window.waitForTimeout(500);
 
-    // Click the List All button - just verify it doesn't crash
-    await window.locator('.variableListBtn').click();
-    await window.waitForTimeout(2000);
+    // Click the List All button
+    const listAllBtn = window.locator('.variableListBtn');
+    await listAllBtn.click({ force: true });
     
-    // The test passes if we get here without errors
-    expect(true).toBe(true);
+    // Wait for the result to be visible
+    const variableQueryResult = window.locator('.variableQueryResult');
+    await expect(variableQueryResult).toBeVisible({ timeout: 10000 });
+    
+    const resultText = await variableQueryResult.textContent();
+    console.log("Variable query result text:", resultText);
+    expect(resultText).toContain('myVar');
   });
 
   test('closes variable query panel', async () => {

@@ -248,12 +248,13 @@ var inkHighlightRules = function() {
             ],
             
             push: [{
-                regex: /(\s*)(\w+)(\s*)/,
+                regex: /(\s*)([a-zA-Z_]\w*)(\s*)/,
                 token: [
                     "var-decl",      // whitespace
                     "var-decl.name", // var_name
                     "var-decl"       // whitespace
-                ]
+                ],
+                next: "pop"
             }, 
 
             // The rest of the assignment line
