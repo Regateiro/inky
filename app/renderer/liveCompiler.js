@@ -490,16 +490,9 @@ function isPaused() {
     return paused;
 }
 
-function stop() {
-    if (currentPlaySessionId) {
-        stopInklecateSession(currentPlaySessionId);
-    }
-}
-
 exports.LiveCompiler = Object.assign(LiveCompiler, {
     setProject: setProject,
     reload: reloadInklecateSession,
-    stop: stop,
     exportJson: exportJson,
     setEdited: setEdited,
     getIssues: () => { return issues; },
