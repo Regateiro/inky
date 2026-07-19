@@ -22,6 +22,7 @@ var compilePending = false;
 var choiceSequence = [];
 var currentTurnIdx = -1;
 var replaying = false;
+var waitingForInput = false;
 
 var issues = [];
 var selectedIssueIdx = -1;
@@ -170,23 +171,27 @@ function choose(choice) {
     ipc.send("play-continue-with-choice-number", choice.number, choice.sourceSessionId);
     choiceSequence.push(choice.number);
     currentTurnIdx++;
+    waitingForInput = false;
 }
 
 function rewind() {
     choiceSequence = [];
     currentTurnIdx = -1;
+    waitingForInput = false;
     reloadInklecateSession();
 }
 
 function stepBack() {
     if( choiceSequence.length > 0 )
         choiceSequence.splice(-1, 1);
+    waitingForInput = false;
     reloadInklecateSession();
 }
 
 function stepBackToTurn(turnIdx) {
     if( turnIdx >= 0 && turnIdx < choiceSequence.length ) {
         choiceSequence.splice(turnIdx);
+        waitingForInput = false;
         reloadInklecateSession();
     }
 }
@@ -325,6 +330,9 @@ ipc.on("play-requires-input", (event, fromSessionId) => {
 
     // May have finished compiling
     updateCompilerIsBusy(false);
+
+    // Story is waiting for input (choices)
+    waitingForInput = true;
 
     var justCompletedReplay = false;
     if( replaying && currentTurnIdx >= choiceSequence.length ) {
@@ -490,6 +498,10 @@ function isPaused() {
     return paused;
 }
 
+function isWaitingForInput() {
+    return waitingForInput;
+}
+
 exports.LiveCompiler = Object.assign(LiveCompiler, {
     setProject: setProject,
     reload: reloadInklecateSession,
@@ -511,5 +523,6 @@ exports.LiveCompiler = Object.assign(LiveCompiler, {
     pause: pause,
     unpause: unpause,
     togglePause: togglePause,
-    isPaused: isPaused
+    isPaused: isPaused,
+    isWaitingForInput: isWaitingForInput
 })

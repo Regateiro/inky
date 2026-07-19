@@ -46,8 +46,6 @@ InkFileSymbols.prototype.parse = function() {
     ];
     const varTypes = [
         { name: "Variable", code: "var-decl"  },
-        { name: "List",     code: "list-decl" },
-        { name: "External", code: "external"},
     ];
     const topLevelInkFlow = { level: 0 };
 
@@ -126,13 +124,7 @@ InkFileSymbols.prototype.parse = function() {
                 isfunc = false
             }
             else if( varType ) {
-                switch (tok.type){
-                    case "external.declaration.name":
-                        externals.add(symbolName)
-                        break;
-                    default:
-                        variables.add(symbolName);
-                }
+                variables.add(symbolName);
             }
             // Not a knot/stitch/gather/choice nor a variable. Do nothing.
         }
