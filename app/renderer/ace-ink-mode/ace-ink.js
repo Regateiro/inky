@@ -253,7 +253,8 @@ var inkHighlightRules = function() {
                     "var-decl",      // whitespace
                     "var-decl.name", // var_name
                     "var-decl"       // whitespace
-                ]
+                ],
+                next: "pop"
             }, 
 
             // The rest of the assignment line

@@ -46,6 +46,8 @@ InkFileSymbols.prototype.parse = function() {
     ];
     const varTypes = [
         { name: "Variable", code: "var-decl"  },
+        { name: "List",     code: "list-decl" },
+        { name: "External", code: "external"},
     ];
     const topLevelInkFlow = { level: 0 };
 
