@@ -314,12 +314,16 @@ ExpressionWatchView.eventEmitter.on("change", () => {
 
 ExpressionWatchView.eventEmitter.on("queryVariable", (varName) => {
     debugTrace("ExpressionWatchView.queryVariable", varName);
-    LiveCompiler.evaluateExpression(varName, (result, error) => {
-        if( error ) {
-            ExpressionWatchView.showVariableResult("Error: " + error);
-        } else {
-            ExpressionWatchView.showVariableResult(varName + " = " + result);
-        }
+    // Reload the story to get it into a clean state (not waiting for a choice)
+    LiveCompiler.reload();
+    LiveCompiler.once("replayComplete", () => {
+        LiveCompiler.evaluateExpression(varName, (result, error) => {
+            if( error ) {
+                ExpressionWatchView.showVariableResult("Error: " + error);
+            } else {
+                ExpressionWatchView.showVariableResult(varName + " = " + result);
+            }
+        });
     });
 });
 
@@ -331,7 +335,6 @@ ExpressionWatchView.eventEmitter.on("listVariables", () => {
     
     const allVariables = new Set();
     inkCompleter.inkFiles.forEach(file => {
-        // Ensure symbols are parsed before getting variables
         try {
             file.symbols.parse();
             const vars = file.symbols.getCachedVariables();
@@ -345,43 +348,45 @@ ExpressionWatchView.eventEmitter.on("listVariables", () => {
         return;
     }
     
-    // Query each variable sequentially and collect results
-    const results = [];
-    const varArray = Array.from(allVariables).sort();
+    // Reload the story to get it into a clean state (not waiting for a choice)
+    LiveCompiler.reload();
     
-    function queryNext(index) {
-        if (index >= varArray.length) {
-            // All queries complete, display results
-            ExpressionWatchView.showVariableResult(results.join("\n"));
-            return;
+    // Wait for the reload to complete, then query variables
+    LiveCompiler.once("replayComplete", () => {
+        // Query each variable sequentially and collect results
+        const results = [];
+        const varArray = Array.from(allVariables).sort();
+        
+        function queryNext(index) {
+            if (index >= varArray.length) {
+                ExpressionWatchView.showVariableResult(results.join("\n"));
+                return;
+            }
+            
+            const varName = varArray[index];
+            
+            let completed = false;
+            const timeout = setTimeout(() => {
+                if (!completed) {
+                    results.push(`${varName} = <timeout>`);
+                    queryNext(index + 1);
+                }
+            }, 2000);
+            
+            LiveCompiler.evaluateExpression(varName, (result, error) => {
+                completed = true;
+                clearTimeout(timeout);
+                if (error) {
+                    results.push(`${varName} = <error: ${error}>`);
+                } else {
+                    results.push(`${varName} = ${result}`);
+                }
+                queryNext(index + 1);
+            });
         }
         
-        const varName = varArray[index];
-        
-        // Add timeout to prevent hanging
-        let completed = false;
-        const timeout = setTimeout(() => {
-            if (!completed) {
-                results.push(`${varName} = <timeout>`);
-                queryNext(index + 1);
-            }
-        }, 2000);
-        
-        LiveCompiler.evaluateExpression(varName, (result, error) => {
-            completed = true;
-            clearTimeout(timeout);
-            if (error) {
-                results.push(`${varName} = <error: ${error}>`);
-            } else {
-                results.push(`${varName} = ${result}`);
-            }
-            // Query next variable
-            queryNext(index + 1);
-        });
-    }
-    
-    // Start querying from the first variable
-    queryNext(0);
+        queryNext(0);
+    });
 });
 
 ToolbarView.on("toggleSidebar", (id, buttonId) => {
