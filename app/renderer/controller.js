@@ -314,7 +314,19 @@ ExpressionWatchView.eventEmitter.on("change", () => {
 
 ExpressionWatchView.eventEmitter.on("queryVariable", (varName) => {
     debugTrace("ExpressionWatchView.queryVariable", varName);
+    
+    // Pause the story to prevent variable queries from being interpreted as choices
+    const wasPaused = LiveCompiler.isPaused();
+    if (!wasPaused) {
+        LiveCompiler.pause();
+    }
+    
     LiveCompiler.evaluateExpression(varName, (result, error) => {
+        // Unpause if we paused it
+        if (!wasPaused) {
+            LiveCompiler.unpause();
+        }
+        
         if( error ) {
             ExpressionWatchView.showVariableResult("Error: " + error);
         } else {
@@ -334,7 +346,12 @@ ExpressionWatchView.eventEmitter.on("listVariables", () => {
         try {
             file.symbols.parse();
             const vars = file.symbols.getCachedVariables();
-            vars.forEach(v => allVariables.add(v));
+            vars.forEach(v => {
+                // Only include valid variable names (start with letter or underscore)
+                if (/^[a-zA-Z_]/.test(v)) {
+                    allVariables.add(v);
+                }
+            });
         } catch(e) {
         }
     });
@@ -344,6 +361,12 @@ ExpressionWatchView.eventEmitter.on("listVariables", () => {
         return;
     }
     
+    // Pause the story to prevent variable queries from being interpreted as choices
+    const wasPaused = LiveCompiler.isPaused();
+    if (!wasPaused) {
+        LiveCompiler.pause();
+    }
+    
     // Query each variable sequentially and collect results
     const results = [];
     const varArray = Array.from(allVariables).sort();
@@ -351,6 +374,10 @@ ExpressionWatchView.eventEmitter.on("listVariables", () => {
     function queryNext(index) {
         if (index >= varArray.length) {
             ExpressionWatchView.showVariableResult(results.join("\n"));
+            // Unpause if we paused it
+            if (!wasPaused) {
+                LiveCompiler.unpause();
+            }
             return;
         }
         
