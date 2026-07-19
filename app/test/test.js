@@ -785,7 +785,6 @@ test.describe('variable query', () => {
     await expect(variableQueryResult).toBeVisible({ timeout: 10000 });
     
     const resultText = await variableQueryResult.textContent();
-    console.log("Variable query result text:", resultText);
     expect(resultText).toContain('myVar');
   });
 

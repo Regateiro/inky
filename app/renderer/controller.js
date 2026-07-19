@@ -325,11 +325,9 @@ ExpressionWatchView.eventEmitter.on("queryVariable", (varName) => {
 
 ExpressionWatchView.eventEmitter.on("listVariables", () => {
     debugTrace("ExpressionWatchView.listVariables");
-    debug("listVariables: starting");
     
     // Get all variables from all files
     const inkCompleter = require("./inkCompleter.js").inkCompleter;
-    debug("listVariables: inkCompleter.inkFiles.length =", inkCompleter.inkFiles.length);
     
     const allVariables = new Set();
     inkCompleter.inkFiles.forEach(file => {
@@ -337,17 +335,12 @@ ExpressionWatchView.eventEmitter.on("listVariables", () => {
         try {
             file.symbols.parse();
             const vars = file.symbols.getCachedVariables();
-            debug("listVariables: file", file.filename(), "has", vars.size, "variables:", Array.from(vars));
             vars.forEach(v => allVariables.add(v));
         } catch(e) {
-            debug("listVariables: failed to parse symbols for", file.filename(), e);
         }
     });
     
-    debug("listVariables: total variables found:", allVariables.size, Array.from(allVariables));
-    
     if (allVariables.size === 0) {
-        debug("listVariables: no variables found, showing message");
         ExpressionWatchView.showVariableResult("No variables found in the project.");
         return;
     }
@@ -359,19 +352,16 @@ ExpressionWatchView.eventEmitter.on("listVariables", () => {
     function queryNext(index) {
         if (index >= varArray.length) {
             // All queries complete, display results
-            debug("listVariables: all queries complete, showing results:", results);
             ExpressionWatchView.showVariableResult(results.join("\n"));
             return;
         }
         
         const varName = varArray[index];
-        debug("listVariables: querying variable:", varName);
         
         // Add timeout to prevent hanging
         let completed = false;
         const timeout = setTimeout(() => {
             if (!completed) {
-                debug("listVariables: timeout querying variable:", varName);
                 results.push(`${varName} = <timeout>`);
                 queryNext(index + 1);
             }
@@ -380,7 +370,6 @@ ExpressionWatchView.eventEmitter.on("listVariables", () => {
         LiveCompiler.evaluateExpression(varName, (result, error) => {
             completed = true;
             clearTimeout(timeout);
-            debug("listVariables: got result for", varName, "result:", result, "error:", error);
             if (error) {
                 results.push(`${varName} = <error: ${error}>`);
             } else {
