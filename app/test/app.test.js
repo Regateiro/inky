@@ -5,8 +5,13 @@ let electronApp;
 
 test.beforeEach(async () => {
   electronApp = await electron.launch({
-    args: ['main-process/main.js'],
+    args: ['main-process/main.js', '--test-mode'],
     cwd: __dirname + '/..',
+    headless: true,
+    env: {
+      ...process.env,
+      NODE_ENV: 'test',
+    },
   });
 });
 
@@ -35,6 +40,75 @@ async function setEditorContent(window, text) {
 async function waitForCompilation(window) {
   await window.waitForTimeout(2000);
 }
+
+test.describe('html rendering', () => {
+  test('renders bold tags properly', async () => {
+    const window = await electronApp.firstWindow();
+    await window.waitForLoadState('domcontentloaded');
+    await window.waitForSelector('#editor', { state: 'attached' });
+    await window.waitForTimeout(1500);
+
+    await setEditorContent(window, 'This is <b>bold</b> text');
+    await waitForCompilation(window);
+
+    const playerHtml = await window.evaluate(() => {
+      const activeBuffer = document.querySelector('#player .innerText.active');
+      return activeBuffer ? activeBuffer.innerHTML : '';
+    });
+    expect(playerHtml).toContain('<b>');
+    expect(playerHtml).toContain('bold');
+  });
+
+  test('renders italic tags properly', async () => {
+    const window = await electronApp.firstWindow();
+    await window.waitForLoadState('domcontentloaded');
+    await window.waitForSelector('#editor', { state: 'attached' });
+    await window.waitForTimeout(1500);
+
+    await setEditorContent(window, 'This is <i>italic</i> text');
+    await waitForCompilation(window);
+
+    const playerHtml = await window.evaluate(() => {
+      const activeBuffer = document.querySelector('#player .innerText.active');
+      return activeBuffer ? activeBuffer.innerHTML : '';
+    });
+    expect(playerHtml).toContain('<i>');
+    expect(playerHtml).toContain('italic');
+  });
+});
+
+test.describe('issue popup styling', () => {
+  test('issue popup text is selectable', async () => {
+    const window = await electronApp.firstWindow();
+    await window.waitForLoadState('domcontentloaded');
+    await window.waitForSelector('#editor', { state: 'attached' });
+    await window.waitForTimeout(1500);
+
+    await setEditorContent(window, '-> broken_divert\nSome text here');
+    await waitForCompilation(window);
+
+    await window.locator('.issuesSummary').hover();
+    await window.waitForTimeout(500);
+
+    const issuePopup = window.locator('.issue-popup');
+    await expect(issuePopup).toBeVisible();
+
+    const popupStyles = await window.evaluate(() => {
+      const popup = document.querySelector('.issue-popup');
+      if (!popup) return null;
+      const issueElement = popup.querySelector('.issue');
+      const lineNoElement = popup.querySelector('.line-no');
+      return {
+        issue: issueElement ? window.getComputedStyle(issueElement).userSelect : null,
+        lineNo: lineNoElement ? window.getComputedStyle(lineNoElement).userSelect : null,
+      };
+    });
+
+    expect(popupStyles).toBeTruthy();
+    expect(popupStyles.issue).toBe('text');
+    expect(popupStyles.lineNo).toBe('text');
+  });
+});
 
 test.describe('application launch tests', () => {
   test('shows an initial window', async () => {

@@ -21,6 +21,11 @@ var electronWindowOptions = {
   
 };
 
+if (process.env.NODE_ENV === 'test' || process.argv.includes('--test-mode')) {
+  electronWindowOptions.show = false;
+  electronWindowOptions.focusable = false;
+  electronWindowOptions.skipTaskbar = true;
+}
 
 if( process.platform == "darwin" ) {
     electronWindowOptions.titleBarStyle = 'hidden';
@@ -52,6 +57,11 @@ function ProjectWindow(filePath) {
 
     electronWindowOptions.title = i18n._("Inky");
     this.browserWindow = new BrowserWindow(electronWindowOptions);
+    
+    if (process.env.NODE_ENV === 'test' || process.argv.includes('--test-mode')) {
+        this.browserWindow.showInactive();
+    }
+    
     this.browserWindow.loadURL("file://" + __dirname + "/../renderer/index.html");
     this.browserWindow.setSheetOffset(49);
 
