@@ -271,6 +271,10 @@ exports.snippets = [
             {
                 name: i18n._('Printing: TOOLTIP'),
                 ink:  loadLongerSnippet("tooltip.ink") 
+            },
+            {
+                name: i18n._('Printing: COLOR'),
+                ink:  loadLongerSnippet("color.ink") 
             }
         ]
     },

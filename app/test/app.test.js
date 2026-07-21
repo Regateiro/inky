@@ -142,6 +142,33 @@ test.describe('html rendering', () => {
     expect(playerText).toContain("The blood dripped slowly.");
   });
 
+  test('COLOR function wraps text in font color', async () => {
+    const window = await electronApp.firstWindow();
+    await window.waitForLoadState('domcontentloaded');
+    await window.waitForSelector('#editor', { state: 'attached' });
+    await window.waitForTimeout(1500);
+
+    const inkSrc = "The {COLOR(\"blood\", \"red\")} dripped slowly.\n" +
+      "\n" +
+      "=== function COLOR(text, color)\n" +
+      "\t~ return \"<font color='\" + color + \"'>\" + text + \"</font>\"\n";
+    await setEditorContent(window, inkSrc);
+    await waitForCompilation(window);
+
+    const playerHtml = await window.evaluate(() => {
+      const activeBuffer = document.querySelector('#player .innerText.active');
+      return activeBuffer ? activeBuffer.innerHTML : '';
+    });
+    expect(playerHtml).toContain("<font color=\"red\">");
+    expect(playerHtml).toContain("blood");
+
+    const playerText = await window.evaluate(() => {
+      const activeBuffer = document.querySelector('#player .innerText.active');
+      return activeBuffer ? activeBuffer.textContent : '';
+    });
+    expect(playerText).toContain("The blood dripped slowly.");
+  });
+
 });
 
 test.describe('issue popup styling', () => {
