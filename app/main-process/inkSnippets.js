@@ -267,6 +267,10 @@ exports.snippets = [
             {
                 name: i18n._('Printing: list_with_commas'),
                 ink:  loadLongerSnippet("list_with_commas.ink") 
+            },
+            {
+                name: i18n._('Printing: TOOLTIP'),
+                ink:  loadLongerSnippet("tooltip.ink") 
             }
         ]
     },

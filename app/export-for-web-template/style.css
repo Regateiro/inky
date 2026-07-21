@@ -213,6 +213,10 @@ img {
     padding-bottom: 20px;
 }
 
+.ink-tooltip {
+    cursor: help;
+}
+
 #controls {
     z-index: 4;
     font-size: 9pt;

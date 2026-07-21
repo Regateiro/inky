@@ -139,10 +139,15 @@ function addTextSection(text)
     // Split individual words into span tags, so that they can be underlined
     // when the user holds down the alt key, and so that they can be individually
     // clicked in order to jump to the source.
-    var splitIntoSpans = text.split(" ");
-    var textAsSpans = "<span>" + splitIntoSpans.join("</span> <span>") + "</span>";
-
-    $paragraph.html(textAsSpans);
+    // When text contains HTML tags (e.g. from TOOLTIP function), skip splitting
+    // to preserve the markup.
+    if( /<[a-z][\s\S]*>/i.test(text) ) {
+        $paragraph.html(text);
+    } else {
+        var splitIntoSpans = text.split(" ");
+        var textAsSpans = "<span>" + splitIntoSpans.join("</span> <span>") + "</span>";
+        $paragraph.html(textAsSpans);
+    }
 
     // Keep track of the offset of each word into the content,
     // starting from the end of the last choice (it's global in the current play session)

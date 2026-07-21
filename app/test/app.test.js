@@ -75,6 +75,73 @@ test.describe('html rendering', () => {
     expect(playerHtml).toContain('<i>');
     expect(playerHtml).toContain('italic');
   });
+
+  test('renders tooltip with empty color keeps original font', async () => {
+    const window = await electronApp.firstWindow();
+    await window.waitForLoadState('domcontentloaded');
+    await window.waitForSelector('#editor', { state: 'attached' });
+    await window.waitForTimeout(1500);
+
+    const inkSrc = "She saw the {TOOLTIP(\"figure\", \"info\", \"\")} in the distance.\n" +
+      "\n" +
+      "=== function TOOLTIP(text, tooltip, color)\n" +
+      "\t{color:\n" +
+      "\t\t~ return \"<span class='ink-tooltip' title='\" + tooltip + \"'><font color='\" + color + \"'>\" + text + \"</font></span>\"\n" +
+      "\t- else:\n" +
+      "\t\t~ return \"<span class='ink-tooltip' title='\" + tooltip + \"'>\" + text + \"</span>\"\n" +
+      "\t}\n";
+    await setEditorContent(window, inkSrc);
+    await waitForCompilation(window);
+
+    const playerHtml = await window.evaluate(() => {
+      const activeBuffer = document.querySelector('#player .innerText.active');
+      return activeBuffer ? activeBuffer.innerHTML : '';
+    });
+    expect(playerHtml).toContain("ink-tooltip");
+    expect(playerHtml).toContain("title=\"info\"");
+    expect(playerHtml).toContain("figure");
+    expect(playerHtml).not.toContain("<font");
+
+    const playerText = await window.evaluate(() => {
+      const activeBuffer = document.querySelector('#player .innerText.active');
+      return activeBuffer ? activeBuffer.textContent : '';
+    });
+    expect(playerText).toContain("She saw the figure in the distance.");
+  });
+
+  test('renders tooltip with color applies font color', async () => {
+    const window = await electronApp.firstWindow();
+    await window.waitForLoadState('domcontentloaded');
+    await window.waitForSelector('#editor', { state: 'attached' });
+    await window.waitForTimeout(1500);
+
+    const inkSrc = "The {TOOLTIP(\"blood\", \"Careful where you step\", \"red\")} dripped slowly.\n" +
+      "\n" +
+      "=== function TOOLTIP(text, tooltip, color)\n" +
+      "\t{color:\n" +
+      "\t\t~ return \"<span class='ink-tooltip' title='\" + tooltip + \"'><font color='\" + color + \"'>\" + text + \"</font></span>\"\n" +
+      "\t- else:\n" +
+      "\t\t~ return \"<span class='ink-tooltip' title='\" + tooltip + \"'>\" + text + \"</span>\"\n" +
+      "\t}\n";
+    await setEditorContent(window, inkSrc);
+    await waitForCompilation(window);
+
+    const playerHtml = await window.evaluate(() => {
+      const activeBuffer = document.querySelector('#player .innerText.active');
+      return activeBuffer ? activeBuffer.innerHTML : '';
+    });
+    expect(playerHtml).toContain("ink-tooltip");
+    expect(playerHtml).toContain("title=\"Careful where you step\"");
+    expect(playerHtml).toContain("<font color=\"red\">");
+    expect(playerHtml).toContain("blood");
+
+    const playerText = await window.evaluate(() => {
+      const activeBuffer = document.querySelector('#player .innerText.active');
+      return activeBuffer ? activeBuffer.textContent : '';
+    });
+    expect(playerText).toContain("The blood dripped slowly.");
+  });
+
 });
 
 test.describe('issue popup styling', () => {

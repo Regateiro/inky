@@ -646,6 +646,10 @@ img.issue-icon.warning {
   font-family: Monaco, 'Courier New', monospace;
 }
 
+#player .ink-tooltip {
+  cursor: help;
+}
+
 #player.altKey .innerText p span:hover {
   text-decoration: underline;
   cursor: pointer;
