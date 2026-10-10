@@ -40,6 +40,12 @@ is updated from the latest inkle/ink release via `make update-deps` (Git LFS).
 - **`make update-deps`** now also refreshes the `nodeenv` runtime to the
   latest stable Node (recreating `node-env/`) before updating the npm
   dependencies and the `inklecate` binary.
+- **Test suite** split into per-category files (`launch`, `editor`, `compiler`,
+  `player`, `issues`, `navigation`, `find-in-project`, `project`, `debugging`)
+  that share a common Electron launch harness (`app/test/_launch.js`),
+  replacing the monolithic `app/test/app.test.js`. The T-series
+  (`regression.test.js`) and M-series (`robustness.test.js`) files are
+  unchanged.
 - **`inklecate` compiler binary** (`app/main-process/ink/inklecate_linux`)
   is updated from the latest inkle/ink release via
   `make update-deps`/`build/update-inklecate.sh`, and is stored with Git LFS.
