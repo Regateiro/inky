@@ -12,8 +12,11 @@ dependencies:
 
 update-deps: dependencies
 	# Update node itself to the latest stable release by recreating the nodeenv
-	# environment (npm packages live in app/node_modules, so nothing is lost)
-	nodeenv --force node-env
+	# environment. The env is rebuilt from scratch (rm -rf + nodeenv) rather
+	# than with --force: force extracts the new prebuilt over the old one and
+	# can leave stale npm modules behind that break npm (npm packages live in
+	# app/node_modules, so nothing is lost by recreating the env).
+	rm -rf node-env && nodeenv node-env
 	# Update node dependencies (to the latest versions within the declared ranges)
 	(source node-env/bin/activate && cd app && npm update)
 	# Update the inklecate compiler binaries from the latest inkle/ink release
