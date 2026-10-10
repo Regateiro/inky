@@ -1,4 +1,20 @@
-.PHONY: build
+.PHONY: build dependencies update-deps
+
+dependencies:
+	@sudo dnf install -y nodeenv || sudo apt install -y nodeenv || echo "Please install nodeenv manually"
+	$(shell if [ ! -d node-env ]; then nodeenv node-env; fi)
+	# The inklecate compiler binaries are stored with Git LFS (they exceed
+	# GitHub's file size limits). Install git-lfs, register its filters/hooks,
+	# then materialize the real executables into the working tree.
+	@sudo dnf install -y git-lfs || sudo apt install -y git-lfs || echo "Please install git-lfs manually"
+	@git lfs install
+	@git lfs pull
+
+update-deps: dependencies
+	# Update node dependencies (to the latest versions within the declared ranges)
+	(source node-env/bin/activate && cd app && npm update)
+	# Update the inklecate compiler binaries from the latest inkle/ink release
+	./build/update-inklecate.sh
 
 dev-install:
 	(source node-env/bin/activate && cd app && npm install)

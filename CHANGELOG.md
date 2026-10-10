@@ -10,8 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 A robustness, security and testing release: the interactive compiler and the
 main process were hardened against crashes, cross-window input injection and
 path traversal, and the app gained a permanent regression/robustness test
-suite. The bundled `inklecate` binaries are now committed for real instead of
-as Git LFS pointer files.
+suite. The app is now Linux-only, and the bundled `inklecate` compiler binary
+is updated from the latest inkle/ink release via `make update-deps` (Git LFS).
 
 ### Added
 
@@ -34,9 +34,12 @@ as Git LFS pointer files.
 
 ### Changed
 
-- **Bundled `inklecate` compiler binaries** replaced the Git LFS pointer files
-  with the actual executables, for Linux, macOS and Windows, in both
-  `app/main-process/ink/` and `app/main-process/ink/inkjs-compatible/`.
+- **Linux-only app**: macOS and Windows support was removed. The compiler
+  binary path (`inklecate.js`), the packaging script (`build-package.js`), the
+  GitHub Actions build workflow and the README only cover Linux now.
+- **`inklecate` compiler binary** (`app/main-process/ink/inklecate_linux`)
+  is updated from the latest inkle/ink release via
+  `make update-deps`/`build/update-inklecate.sh`, and is stored with Git LFS.
 - **Live compiler replies** now use FIFO callback queues instead of single
   callback slots, and the main process counts outstanding expression
   evaluations and variable listings instead of using a single flag.
@@ -96,6 +99,11 @@ as Git LFS pointer files.
 
 ### Removed
 
+- macOS and Windows inklecate binaries (`inklecate_mac`, `inklecate_win.exe`)
+  and their `inkjs-compatible/` copies.
+- macOS packaging resources (`Icon.icns`, `Info.plist`, `appdmg.json`,
+  `appdmg-background.png`, `appdmg-background@2x.png`, `makeIcns.command`)
+  and the Windows icon (`Icon1024.png.ico`), plus the `appdmg` npm dependency.
 - Per-platform build scripts (`BUILD_FOR_LINUX.sh`, `BUILD_FOR_MAC.command`,
   `BUILD_FOR_MAC_SIGN_AND_MAKE_DMG.command`, `BUILD_FOR_WINDOWS.bat`,
   `INSTALL_AND_RUN.command`, `RUN.command`, `BUILD_PACKAGE.command`),

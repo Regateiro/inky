@@ -8,8 +8,6 @@ const mkdirp = require('mkdirp');
 
 // inklecate is packaged outside of the main asar bundle since it's executable
 const inklecateNames = {
-    "darwin": "/ink/inklecate_mac",
-    "win32":  "/ink/inklecate_win.exe",
     "linux": "/ink/inklecate_linux"
 }
 const inklecateRootPathRelease = path.join(__dirname, "../../app.asar.unpacked/main-process");
@@ -28,12 +26,7 @@ catch(e) {
 if( process.env.INKY_INKLECATE_PATH )
     inklecatePath = process.env.INKY_INKLECATE_PATH;
 
-var tempInkPath;
-if (process.platform == "darwin" || process.platform == "linux") {
-    tempInkPath = process.env.TMPDIR ? path.join(process.env.TMPDIR, "inky_compile") : "/tmp/inky_compile";
-} else {
-    tempInkPath = path.join(process.env.temp, "inky_compile")
-}
+var tempInkPath = process.env.TMPDIR ? path.join(process.env.TMPDIR, "inky_compile") : "/tmp/inky_compile";
 
 var sessions = {};
 

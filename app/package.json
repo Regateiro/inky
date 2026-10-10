@@ -42,7 +42,5 @@
     "markdown-html": "^0.0.8",
     "playwright": "^1.61.1"
   },
-  "optionalDependencies": {
-    "appdmg": "^0.6.6"
-  }
+  "optionalDependencies": {}
 }

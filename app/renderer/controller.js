@@ -427,12 +427,6 @@ ToolbarView.on("togglePause", () => {
     debugTrace("ToolbarView.togglePause");
     LiveCompiler.togglePause();
 });
-ToolbarView.on("didSetTitle", (title) => {
-    debugTrace("ToolbarView.didSetTitle", title);
-    if( process.platform == "win32" ) {
-        ipc.send("set-native-window-title", title);
-    }
-});
 
 NavView.on("clickFileId", (fileId) => {
     debugTrace("NavView.clickFileId", fileId);

@@ -27,11 +27,6 @@ if (process.env.NODE_ENV === 'test' || process.argv.includes('--test-mode')) {
   electronWindowOptions.skipTaskbar = true;
 }
 
-if( process.platform == "darwin" ) {
-    electronWindowOptions.titleBarStyle = 'hidden';
-    electronWindowOptions.titleBarOverlay = true;
-}
-
 var windows = [];
 
 const recentFilesPath = path.join(electron.app.getPath("userData"), "recent-files.json");
@@ -453,11 +448,6 @@ ipc.on("project-final-close", (event) => {
 ipc.on("project-settings-needs-reload", (event, rootInkFilePath) => {
     var win = ProjectWindow.withWebContents(event.sender);
     win.refreshProjectSettings(rootInkFilePath);
-});
-
-ipc.on("set-native-window-title", (event, newWindowTitle) => {
-    var win = ProjectWindow.withWebContents(event.sender);
-    win.browserWindow.title = newWindowTitle;
 });
 
 ipc.on("project-state-changed", (event, state) => {

@@ -98,8 +98,6 @@ ipcMain.handle("try-close", async (event) =>{
 app.on('will-finish-launching', function () {
 });
 
-let isQuitting = false;
-
 app.on("open-file", function (event, path) {
 
     // e.g. Drag and drop onto app to open it.
@@ -129,16 +127,6 @@ app.on("open-file", function (event, path) {
     event.preventDefault();
 });
 
-app.on('before-quit', function () {
-    // We need this to differentiate between pressing quit (which should quit) or closing all windows
-    // (which leaves the app open)
-    isQuitting = true;
-});
-
-ipcMain.on("project-cancelled-close", (event) => {
-    isQuitting = false;
-});
-
 ipcMain.on("update-current-filename", (event, filename) => {
     AppMenus.setCurrentFilename(filename);
     AppMenus.refresh();
@@ -150,9 +138,7 @@ ipcMain.on("update-current-filename", (event, filename) => {
 app.on('ready', function () {
     
     app.on('window-all-closed', function () {
-        if (process.platform != 'darwin' || isQuitting) {
-            app.quit();
-        }
+        app.quit();
     });
     
     AppMenus.setCallbacks({
@@ -413,18 +399,7 @@ app.on('ready', function () {
         return win;
     };
 
-    // Windows passed file to open on command line?
-    if (process.platform == "win32" && process.argv.length > 1 && !pendingPathToOpen) {
-        for (let i = 1; i < process.argv.length; i++) {
-            var arg = process.argv[i].toLowerCase();
-            if (arg.endsWith(".ink")) {
-                pendingPathToOpen = process.argv[i];
-                break;
-            }
-        }
-    }
-
-    // Opened Inky with specific file (e.g. drag and drop or windows command line)
+    // Opened Inky with a specific file (e.g. drag and drop or command line)
     if( pendingPathToOpen ) {
         ProjectWindow.open(pendingPathToOpen);
         pendingPathToOpen = null;

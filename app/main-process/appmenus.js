@@ -323,7 +323,7 @@ function refresh() {
             submenu: [
                 {
                     label: i18n._('Toggle Full Screen'),
-                    accelerator: process.platform === 'darwin' ? 'Ctrl+Command+F' : 'F11',
+                    accelerator: 'F11',
                     click(item, focusedWindow) {
                         if (focusedWindow)
                             focusedWindow.setFullScreen(!focusedWindow.isFullScreen());
@@ -515,7 +515,7 @@ function refresh() {
                         },
                         {
                             label: i18n._('Toggle Developer Tools'),
-                            accelerator: process.platform === 'darwin' ? 'Alt+Command+I' : 'Ctrl+Shift+I',
+                            accelerator: 'Ctrl+Shift+I',
                             click(item, focusedWindow) {
                                 if (focusedWindow)
                                     focusedWindow.webContents.toggleDevTools();
@@ -541,73 +541,13 @@ function refresh() {
     // Customise menus for the specific platform
     const name = app.getName();
     const aboutWindowLabel = i18n._('About ') + name;
-    // Mac specific menus
-    if (process.platform === 'darwin') {
-        menuTemplate.unshift({
-            label: name,
-            submenu: [
-                {
-                    label: aboutWindowLabel,
-                    click: callbacks.showAbout
-                    // role: 'about'
-                },
-                {
-                    type: 'separator'
-                },
-                {
-                    label: i18n._('Services'),
-                    role: 'services',
-                    submenu: []
-                },
-                {
-                    type: 'separator'
-                },
-                {
-                    label: i18n._('Hide ') + name,
-                    accelerator: 'Command+H',
-                    role: 'hide'
-                },
-                {
-                    label: i18n._('Hide Others'),
-                    accelerator: 'Command+Alt+H',
-                    role: 'hideothers'
-                },
-                {
-                    label: i18n._('Show All'),
-                    role: 'unhide'
-                },
-                {
-                    type: 'separator'
-                },
-                {
-                    label: i18n._('Quit'),
-                    accelerator: 'Command+Q',
-                    click() { app.quit(); }
-                },
-            ]
-        });
-
-        var windowMenu = _.find(menuTemplate, menu => menu.role == "window");
-        windowMenu.submenu.push(
-            {
-                type: 'separator'
-            },
-            {
-                label: i18n._('Bring All to Front'),
-                role: 'front'
-            }
-        );
-    }
-    else
-    {
-        // Windows specific menu items
-        menuTemplate.find(x => x.role === 'help').submenu.push(
-            {
-                label: aboutWindowLabel,
-                click: callbacks.showAbout
-            }
-        );
-    }
+    // Linux: the About item lives in the Help menu
+    menuTemplate.find(x => x.role === 'help').submenu.push(
+        {
+            label: aboutWindowLabel,
+            click: callbacks.showAbout
+        }
+    );
     
 
     const menu = Menu.buildFromTemplate(menuTemplate);
