@@ -104,12 +104,11 @@ function compile(compileInstruction, requester) {
 
     inklecateOptions.push(mainInkPath);
 
+    // Exporting for JS/web (for the bundled inkjs) uses this same compiler
+    // binary: the separate inkjs-compatible build was dropped after verifying
+    // its compiled JSON was byte-identical to this one's for the current ink
+    // release.
     var inklecatePathToUse = inklecatePath;
-    if( compileInstruction.inkJsCompatible ) {
-        var inklecateName = path.basename(inklecatePath);
-        var inklecateFolderName = path.dirname(inklecatePath);
-        inklecatePathToUse = path.resolve(inklecateFolderName, "inkjs-compatible", inklecateName);
-    }
 
     if( sessions[sessionId] ) {
         stop(sessionId);
