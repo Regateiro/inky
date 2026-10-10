@@ -11,6 +11,9 @@ dependencies:
 	@git lfs pull
 
 update-deps: dependencies
+	# Update node itself to the latest stable release by recreating the nodeenv
+	# environment (npm packages live in app/node_modules, so nothing is lost)
+	nodeenv --force node-env
 	# Update node dependencies (to the latest versions within the declared ranges)
 	(source node-env/bin/activate && cd app && npm update)
 	# Update the inklecate compiler binaries from the latest inkle/ink release

@@ -37,6 +37,9 @@ is updated from the latest inkle/ink release via `make update-deps` (Git LFS).
 - **Linux-only app**: macOS and Windows support was removed. The compiler
   binary path (`inklecate.js`), the packaging script (`build-package.js`), the
   GitHub Actions build workflow and the README only cover Linux now.
+- **`make update-deps`** now also refreshes the `nodeenv` runtime to the
+  latest stable Node (recreating `node-env/`) before updating the npm
+  dependencies and the `inklecate` binary.
 - **`inklecate` compiler binary** (`app/main-process/ink/inklecate_linux`)
   is updated from the latest inkle/ink release via
   `make update-deps`/`build/update-inklecate.sh`, and is stored with Git LFS.
