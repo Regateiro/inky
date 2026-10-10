@@ -40,6 +40,10 @@ is updated from the latest inkle/ink release via `make update-deps` (Git LFS).
 - **`inklecate` compiler binary** (`app/main-process/ink/inklecate_linux`)
   is updated from the latest inkle/ink release via
   `make update-deps`/`build/update-inklecate.sh`, and is stored with Git LFS.
+  It now matches the official inkle/ink v1.2.1 release asset (previously the
+  repo carried a differently-built binary of the same version), and
+  `build/update-inklecate.sh` keeps `app/main-process/ink/version.txt` (shown
+  in the About dialog) in sync with the release tag.
 - **Live compiler replies** now use FIFO callback queues instead of single
   callback slots, and the main process counts outstanding expression
   evaluations and variable listings instead of using a single flag.
