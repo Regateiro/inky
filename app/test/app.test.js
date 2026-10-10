@@ -1,11 +1,19 @@
 const { _electron: electron } = require('playwright');
 const { test, expect } = require('@playwright/test');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 let electronApp;
+let userDataDir;
 
 test.beforeEach(async () => {
+  // Isolated user data dir per test: tests never touch the real profile, and
+  // the single-instance lock (which is per user data dir) can't leak between
+  // parallel test files.
+  userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'inky-test-ud-'));
   electronApp = await electron.launch({
-    args: ['main-process/main.js', '--test-mode'],
+    args: ['main-process/main.js', '--test-mode', '--user-data-dir', userDataDir],
     cwd: __dirname + '/..',
     headless: true,
     env: {
@@ -27,6 +35,10 @@ test.afterEach(async () => {
       }).catch(() => {});
     }
     await electronApp.close();
+  }
+  if (userDataDir) {
+    try { fs.rmSync(userDataDir, { recursive: true, force: true }); } catch (e) {}
+    userDataDir = null;
   }
 });
 

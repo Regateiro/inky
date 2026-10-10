@@ -14,3 +14,7 @@ app/renderer/documentation/
 AppImage
 .DS_Store
 node-env/
+.last-run.json
+TODO.md
+.github/
+.vscode/

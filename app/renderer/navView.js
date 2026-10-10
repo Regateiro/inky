@@ -5,7 +5,6 @@ const _ = require("lodash");
 const i18n = require("./i18n.js");
 const InkFile = require("./inkFile.js").InkFile;
 const { range, toInteger } = require('lodash');
-const {ipcRenderer} = require("electron");
 const { debug, debugTrace, debugError } = require("./debug.js");
 
 const slideAnimDuration = 200;
@@ -118,25 +117,9 @@ $(document).ready(() => {
         }
     });
 
-    ipcRenderer.on("project-rename-file", () => {
-        var $active = $fileNavWrapper.find(".nav-group-item.active");
-        if( $active.length > 0 ) {
-            var fileIdStr = $active.attr("data-file-id");
-            if( fileIdStr ) {
-                NavView.emit("renameFileId", parseInt(fileIdStr));
-            }
-        }
-    });
-
-    ipcRenderer.on("project-delete-file", () => {
-        var $active = $fileNavWrapper.find(".nav-group-item.active");
-        if( $active.length > 0 ) {
-            var fileIdStr = $active.attr("data-file-id");
-            if( fileIdStr ) {
-                NavView.emit("deleteFileId", parseInt(fileIdStr));
-            }
-        }
-    });
+    // Note: the 'project-rename-file' / 'project-delete-file' menu commands
+    // are handled in inkProject.js — registering them here too made a single
+    // command run both code paths.
 
     var $dragOverTarget = null;
     var draggedFileId = null;
@@ -267,7 +250,7 @@ $(document).ready(() => {
 
     $(document).on("click", function(e) {
         var $target = $(e.target);
-        if( $footer.hasClass("showingForm") && $target.closest(".footer").length == 0 && $target.closest(".split") == 0 ) {
+        if( $footer.hasClass("showingForm") && $target.closest(".footer").length == 0 && $target.closest(".split").length == 0 ) {
             setIncludeFormVisible(false);
             e.preventDefault();
         }

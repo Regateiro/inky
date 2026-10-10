@@ -57,6 +57,12 @@ function ProjectWindow(filePath) {
 
     electronWindowOptions.title = i18n._("Inky");
     this.browserWindow = new BrowserWindow(electronWindowOptions);
+
+    // Captured while the window is still alive: accessing
+    // browserWindow.webContents after destruction throws "Object has been
+    // destroyed", but session cleanup in the 'closed' handler needs to
+    // identify this window's compiler sessions.
+    this.browserWindowWebContents = this.browserWindow.webContents;
     
     if (process.env.NODE_ENV === 'test' || process.argv.includes('--test-mode')) {
         this.browserWindow.showInactive();
@@ -111,6 +117,13 @@ function ProjectWindow(filePath) {
         var idx = windows.indexOf(this);
         if( idx != -1 )
             windows.splice(idx, 1);
+
+        // Compiler sessions belong to this window: they can't outlive it, so
+        // clean them up however the window went away - including a direct
+        // destroy(), which bypasses the polite close/finalClose flow. Pass the
+        // reference captured at construction: this.browserWindow.webContents
+        // is no longer accessible once the window is destroyed.
+        Inklecate.killSessions(this.browserWindowWebContents);
     });
 
     // Set up theme/zoom from settings
@@ -188,7 +201,7 @@ ProjectWindow.prototype.keyboardShortcuts = function() {
 
 ProjectWindow.prototype.finalClose = function() {
     this.safeToClose = true;
-    Inklecate.killSessions(this.browserWindow);
+    Inklecate.killSessions(this.browserWindowWebContents);
     this.browserWindow.close();
 }
 
@@ -198,8 +211,23 @@ ProjectWindow.prototype.openDevTools = function() {
 
 ProjectWindow.prototype.switchToFile = function(absFilePath) {
     if (!this.mainInkAbsPath) return false;
-    this.browserWindow.webContents.send('open-ink-file-by-path', absFilePath);
-    return true;
+
+    // Only claim the file if it belongs to this window's project: either it
+    // IS the project's main ink, or the renderer confirms it resolves to one
+    // of the project's files (includes etc). Anything else should fall
+    // through to opening in another/new window.
+    let belongs = path.resolve(absFilePath) === path.resolve(this.mainInkAbsPath);
+    if (!belongs &&
+        !this.browserWindow.isDestroyed() &&
+        !this.browserWindow.webContents.isLoading()) {
+        belongs = this.browserWindow.webContents
+            .sendSync('ink-file-belongs-to-project', absFilePath) === true;
+    }
+
+    if (belongs) {
+        this.browserWindow.webContents.send('open-ink-file-by-path', absFilePath);
+    }
+    return belongs;
 }
 
 ProjectWindow.prototype.zoom = function(amount) {

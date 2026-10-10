@@ -1,4 +1,17 @@
 const {app, BrowserWindow, ipcMain, dialog, ipcRenderer, Menu} = require('electron')
+
+// Support a custom user data directory (used by tests and portable installs).
+// Must be applied before any module resolves paths from userData.
+const userDataDirIdx = process.argv.indexOf("--user-data-dir");
+if( userDataDirIdx != -1 && process.argv[userDataDirIdx+1] )
+    app.setPath("userData", process.argv[userDataDirIdx+1]);
+
+// Only one instance per user data directory: a second instance quits (and
+// asks the first one to focus its windows) instead of fighting it over
+// recent files and other shared state.
+if( !app.requestSingleInstanceLock() )
+    app.quit();
+
 const i18n = require("./i18n/i18n.js")
 const {ProjectWindow} = require("./projectWindow.js");
 const {DocumentationWindow} = require("./documentationWindow.js");
@@ -6,8 +19,17 @@ const {AboutWindow} = require("./aboutWindow.js");
 const {AppMenus} = require('./appmenus.js');
 const {onForceQuit} = require('./forceQuitDetect');
 const {Inklecate} = require("./inklecate.js");
+const { sanitizeSaveDialogOptions } = require("./dialogOptions.js");
 const { fstat } = require('original-fs');
 const fs = require("fs");
+
+app.on("second-instance", () => {
+    for( const win of ProjectWindow.all() ) {
+        if( win.browserWindow.isMinimized() )
+            win.browserWindow.restore();
+        win.browserWindow.focus();
+    }
+});
 
 if (process.argv.includes('--disable-gpu')) {
     app.disableHardwareAcceleration();
@@ -52,7 +74,9 @@ ipcMain.on('show-context-menu', (event) => {
 
 
 ipcMain.handle("showSaveDialog", async (event,saveOptions) => {
-    return dialog.showSaveDialog(saveOptions) 
+    // The options come from the renderer: only a safe whitelist of them
+    // reaches the native dialog.
+    return dialog.showSaveDialog(sanitizeSaveDialogOptions(saveOptions)) 
 
 })
 
@@ -190,19 +214,19 @@ app.on('ready', function () {
             if (win) win.exportJSOnly();
         },
         toggleTags: (item, focusedWindow, event) => {
-            focusedWindow.webContents.send("set-tags-visible", item.checked);
+            if (focusedWindow) focusedWindow.webContents.send("set-tags-visible", item.checked);
         },
         nextIssue: (item, focusedWindow) => {
-            focusedWindow.webContents.send("next-issue");
+            if (focusedWindow) focusedWindow.webContents.send("next-issue");
         },
         gotoAnything: (item, focusedWindow) => {
-            focusedWindow.webContents.send("goto-anything");
+            if (focusedWindow) focusedWindow.webContents.send("goto-anything");
         },
         findInProject: (item, focusedWindow) => {
             if (focusedWindow) focusedWindow.webContents.send("find-in-project");
         },
         addWatchExpression: (item, focusedWindow) => {
-            focusedWindow.webContents.send("add-watch-expression");
+            if (focusedWindow) focusedWindow.webContents.send("add-watch-expression");
         },
         showDocs: () => {
             DocumentationWindow.openDocumentation(ProjectWindow.getViewSettings().theme);

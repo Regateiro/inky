@@ -27,10 +27,24 @@ var waitingForInput = false;
 var issues = [];
 var selectedIssueIdx = -1;
 
-var locationInSourceCallbackObj = null;
-var expressionEvaluationObj = null;
-var variablesListCallbackObj = null;
+// Queues rather than single slots: a second request must not orphan the
+// first one - every request gets its own answer, in order.
+var locationInSourceCallbackQueue = [];
+var expressionEvaluationQueue = [];
+var variablesListCallbackQueue = [];
 var jumpToPathCallbackObj = null;
+
+// Take the oldest queued request for the session the reply belongs to,
+// discarding stale entries from sessions that can no longer answer. Returns
+// null when nothing is waiting for this reply.
+function takeQueuedCallback(queue, sessionId) {
+    var idx = queue.findIndex(entry => entry.sessionId == sessionId);
+    if( idx == -1 )
+        return null;
+    if( idx > 0 )
+        queue.splice(0, idx);
+    return queue.shift().callback;
+}
 
 var project = null;
 
@@ -207,17 +221,17 @@ function listVariables(callback) {
         return;
     }
     ipc.send("list-variables", currentPlaySessionId);
-    variablesListCallbackObj = { callback: callback, sessionId: currentPlaySessionId };
+    variablesListCallbackQueue.push({ callback: callback, sessionId: currentPlaySessionId });
 }
 
 function getLocationInSource(offset, callback) {
     ipc.send("get-location-in-source", offset, currentPlaySessionId);
-    locationInSourceCallbackObj = { callback: callback, sessionId: currentPlaySessionId };
+    locationInSourceCallbackQueue.push({ callback: callback, sessionId: currentPlaySessionId });
 }
 
 function getRuntimePathInSource(runtimePath, callback) {
     ipc.send("get-runtime-path-in-source", runtimePath, currentPlaySessionId);
-    locationInSourceCallbackObj = { callback: callback, sessionId: currentPlaySessionId };
+    locationInSourceCallbackQueue.push({ callback: callback, sessionId: currentPlaySessionId });
 }
 
 function evaluateExpression(expressionText, callback) {
@@ -226,7 +240,7 @@ function evaluateExpression(expressionText, callback) {
         return;
     }
     ipc.send("evaluate-expression", expressionText, currentPlaySessionId);
-    expressionEvaluationObj = { callback: callback,  sessionId: currentPlaySessionId };
+    expressionEvaluationQueue.push({ callback: callback, sessionId: currentPlaySessionId });
 }
 
 // --------------------------------------------------------
@@ -413,35 +427,27 @@ ipc.on("play-story-stopped", (event, fromSessionId) => {
 });
 
 ipc.on("return-location-from-source", (event, fromSessionId, locationInfo) => {
-    if( fromSessionId == locationInSourceCallbackObj.sessionId ) {
-        var callback = locationInSourceCallbackObj.callback;
-        locationInSourceCallbackObj = null;
+    var callback = takeQueuedCallback(locationInSourceCallbackQueue, fromSessionId);
+    if( callback )
         callback(locationInfo);
-    }
 });
 
 ipc.on("play-evaluated-expression", (event, textResult, fromSessionId) => {
-    if( fromSessionId == expressionEvaluationObj.sessionId && expressionEvaluationObj ) {
-        var callback = expressionEvaluationObj.callback;
-        expressionEvaluationObj = null;
+    var callback = takeQueuedCallback(expressionEvaluationQueue, fromSessionId);
+    if( callback )
         callback(textResult);
-    }
 });
 
 ipc.on("play-evaluated-expression-error", (event, errorMessage, fromSessionId) => {
-    if( fromSessionId == expressionEvaluationObj.sessionId && expressionEvaluationObj ) {
-        var callback = expressionEvaluationObj.callback;
-        expressionEvaluationObj = null;
+    var callback = takeQueuedCallback(expressionEvaluationQueue, fromSessionId);
+    if( callback )
         callback(null, errorMessage);
-    }
 });
 
 ipc.on("return-variables-list", (event, variablesText, fromSessionId) => {
-    if( fromSessionId == variablesListCallbackObj.sessionId && variablesListCallbackObj ) {
-        var callback = variablesListCallbackObj.callback;
-        variablesListCallbackObj = null;
+    var callback = takeQueuedCallback(variablesListCallbackQueue, fromSessionId);
+    if( callback )
         callback(variablesText);
-    }
 });
 
 ipc.on("return-stats", (event, statsObj, fromSessionId) => {
@@ -450,7 +456,7 @@ ipc.on("return-stats", (event, statsObj, fromSessionId) => {
     
     var callback = statsCompleteCallback;
     statsCompleteCallback = null;
-    callback(statsObj);
+    if( callback ) callback(statsObj);
 
     updateCompilerIsBusy(false);
 

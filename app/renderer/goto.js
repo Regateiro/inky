@@ -124,6 +124,13 @@ function collectSymbols(allSymbols, symbolsObj, recurse)
 function hide({restoreCursor=true}={}) {
     $(document).off("keydown", gotoGlobalKeyHandler);
 
+    // Stop any in-flight results build so it can't keep rendering into a
+    // hidden/stale list.
+    if( resultsBuildInterval != null ) {
+        clearInterval(resultsBuildInterval);
+        resultsBuildInterval = null;
+    }
+
     $goto.addClass("hidden");
     $gotoContainer.addClass("ignore-events");
 
@@ -159,13 +166,15 @@ function refresh() {
 
     select(null);
 
-    if( !searchStr ) return;
-
-    // Cancel previous build of results
+    // Cancel any previous build of results — including when the query has
+    // been cleared, otherwise the stale interval keeps rendering old results
+    // into the emptied list.
     if( resultsBuildInterval != null ) {
         clearInterval(resultsBuildInterval);
         resultsBuildInterval = null;
     }
+
+    if( !searchStr ) return;
 
     $results.scrollTop(0);
 

@@ -147,11 +147,9 @@ function updateIssueSummary(issues, issueClickCallback) {
         "TODO": 5
     };
 
-    // Note: we're sorting the original array that 
-    // was passed in from the caller... bad behaviour?
-    // (it's kinda desirable though, since sorting will be
-    // faster if we're leaving it sorted for next time)
-    issues.sort((i1, i2) => {
+    // Sort a copy: the caller's array must keep its original order (the
+    // issues list is shared with other parts of the app).
+    issues = issues.slice().sort((i1, i2) => {
         var errorTypeDiff = issuePriorties[i1.type] - issuePriorties[i2.type];
         if( errorTypeDiff != 0 )
             return errorTypeDiff;

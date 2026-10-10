@@ -88,7 +88,12 @@ InkProject.prototype.addNewInclude = function(newIncludePath, addToMainInk) {
 
     // Convert new include path to relative if it's not already
     if( path.isAbsolute(newIncludePath) ) {
-        assert(this.mainInk.projectDir, "Main ink needs to be saved before we start loading includes with absolute paths.");
+        if( !this.mainInk.projectDir ) {
+            // Main ink hasn't been saved to disk yet, so there's no project
+            // directory to make the path relative to.
+            alert(i18n._("Main ink needs to be saved before adding includes with absolute paths."));
+            return null;
+        }
         newIncludePath = path.relative(this.mainInk.projectDir, newIncludePath);
     }
 
@@ -277,7 +282,6 @@ InkProject.prototype.startFileWatching = function() {
         var relPath = path.relative(this.mainInk.projectDir, updatedAbsFilePath);
         var inkFile = _.find(this.files, f => f.relPath == relPath);
         if( inkFile ) {
-            // TODO: maybe ask user if they want to overwrite? not sure I want to though
             if( !inkFile.hasUnsavedChanges ) {
 
                 if( this.activeInkFile == inkFile )
@@ -287,6 +291,11 @@ InkProject.prototype.startFileWatching = function() {
                     if( !err && this.activeInkFile == inkFile )
                         setImmediate(() => EditorView.restoreCursorPos());
                 });
+            }
+            else {
+                // The file changed on disk while it has unsaved edits here:
+                // tell the user rather than silently doing nothing.
+                alert(`${i18n._("File was modified outside of Inky:")} ${inkFile.relPath}`);
             }
         }
     });
@@ -300,6 +309,11 @@ InkProject.prototype.startFileWatching = function() {
         if( inkFile ) {
             if( !inkFile.hasUnsavedChanges && inkFile != this.mainInk ) {
                 this.deleteInkFile(inkFile);
+            }
+            else if( inkFile.hasUnsavedChanges ) {
+                // Deleted on disk while it has unsaved edits here: the user
+                // must know - otherwise their changes vanish with no warning.
+                alert(`${i18n._("File was deleted outside of Inky:")} ${inkFile.relPath}`);
             }
         }
     });
@@ -389,6 +403,15 @@ InkProject.prototype.save = function(afterSaveCallback) {
         // Cancel the save process because main ink file save failed
         else {
             this.saveActive = false;
+
+            // If the main ink was the only file, singleFileSaveComplete above
+            // has already fired afterSaveCallback. With pending include files
+            // the count never reaches 0, so fire it here — otherwise the
+            // caller (e.g. save-and-close) waits forever.
+            if( filesRemaining > 0 ) {
+                if( afterSaveCallback )
+                    afterSaveCallback(false);
+            }
         }
     });
 }
@@ -934,6 +957,15 @@ ipcRenderer.on("open-ink-file-by-path", (event, absPath) => {
     if( inkFile ) {
         InkProject.currentProject.showInkFile(inkFile);
     }
+});
+
+// Synchronous query from the main process when routing an incoming file:
+// only the renderer knows the full list of files in the open project, so
+// main asks before claiming a file for this window (see
+// ProjectWindow.prototype.switchToFile).
+ipcRenderer.on("ink-file-belongs-to-project", (event, absPath) => {
+    event.returnValue = !!(InkProject.currentProject &&
+        InkProject.currentProject.inkFileWithAbsolutePath(absPath));
 });
 
 ipcRenderer.on("project-new-include", () => {

@@ -23,6 +23,11 @@ catch(e) {
     inklecatePath = path.join(inklecateRootPathDev, inklecateNames[process.platform]);
 }
 
+// Allow the compiler binary to be overridden, e.g. for testing or for
+// custom inklecate installations.
+if( process.env.INKY_INKLECATE_PATH )
+    inklecatePath = process.env.INKY_INKLECATE_PATH;
+
 var tempInkPath;
 if (process.platform == "darwin" || process.platform == "linux") {
     tempInkPath = process.env.TMPDIR ? path.join(process.env.TMPDIR, "inky_compile") : "/tmp/inky_compile";
@@ -33,6 +38,23 @@ if (process.platform == "darwin" || process.platform == "linux") {
 var sessions = {};
 
 const COMPILATION_SAFETY_TIMEOUT_MS = 30 * 1000;
+
+// Sending to a renderer whose window has been destroyed throws
+// "Object has been destroyed", which - happening inside an event handler -
+// takes the whole main process down. Only send while the window is alive.
+function safeSend(requester, channel, ...args) {
+    if( !requester || typeof requester.isDestroyed != "function" || requester.isDestroyed() )
+        return false;
+    requester.send(channel, ...args);
+    return true;
+}
+
+// Compiler sessions belong to the window that started them: input commands
+// arriving from any other window must not touch their stdin.
+function ownsSession(sender, sessionId) {
+    var session = sessions[sessionId];
+    return !!session && session.requesterWebContents === sender;
+}
 
 function compile(compileInstruction, requester) {
 
@@ -45,7 +67,7 @@ function compile(compileInstruction, requester) {
     try {
         mkdirp.sync(uniqueDirPath);
     } catch(e) {
-        requester.send('play-story-unexpected-error', `Could not create temporary directory '${uniqueDirPath}': ${e.message}`, sessionId);
+        safeSend(requester, 'play-story-unexpected-error', `Could not create temporary directory '${uniqueDirPath}': ${e.message}`, sessionId);
         return;
     }
 
@@ -61,7 +83,7 @@ function compile(compileInstruction, requester) {
             try {
                 mkdirp.sync(fullDir);
             } catch(e) {
-                requester.send('play-story-unexpected-error', `Could not create temporary directory '${fullDir}': ${e.message}`, sessionId);
+                safeSend(requester, 'play-story-unexpected-error', `Could not create temporary directory '${fullDir}': ${e.message}`, sessionId);
                 return;
             }
         }
@@ -114,17 +136,31 @@ function compile(compileInstruction, requester) {
         ended: false,
         evaluatingExpression: false,
         listingVariables: false,
-        justRequestedDebugSource: false
+        justRequestedDebugSource: false,
+        cmdReplyReceivedForPrompt: false
     };
     var session = sessions[sessionId];
+
+    // The compiler binary can be missing or not executable. Without a
+    // listener, the resulting 'error' event is an uncaught exception that
+    // takes the whole app down.
+    playProcess.on('error', (err) => {
+        console.error(`Failed to start inklecate for session '${sessionId}': ${err.message}`);
+        if( sessions[sessionId] ) {
+            if( sessions[sessionId].safetyTimeout ) clearTimeout(sessions[sessionId].safetyTimeout);
+            delete sessions[sessionId];
+        }
+        safeSend(requester, 'play-story-unexpected-error', `Could not start the ink compiler: ${err.message}`, sessionId);
+        safeSend(requester, 'play-exit-due-to-error', -1, sessionId);
+    });
 
     session.safetyTimeout = setTimeout(() => {
         console.error(`Inklecate session '${sessionId}' timed out after ${COMPILATION_SAFETY_TIMEOUT_MS/1000}s, killing process`);
         if( sessions[sessionId] ) {
             sessions[sessionId].stopped = true;
             sessions[sessionId].process.kill('SIGKILL');
-            requester.send('play-story-unexpected-error', `Compilation timed out after ${COMPILATION_SAFETY_TIMEOUT_MS/1000} seconds. The compiler may be hung.`, sessionId);
-            requester.send('play-exit-due-to-error', -1, sessionId);
+            safeSend(requester, 'play-story-unexpected-error', `Compilation timed out after ${COMPILATION_SAFETY_TIMEOUT_MS/1000} seconds. The compiler may be hung.`, sessionId);
+            safeSend(requester, 'play-exit-due-to-error', -1, sessionId);
             delete sessions[sessionId];
         }
     }, COMPILATION_SAFETY_TIMEOUT_MS);
@@ -134,7 +170,7 @@ function compile(compileInstruction, requester) {
         // Strip Byte order mark
         data = data.replace(/^\uFEFF/, '');
         if( data.length > 0 ) {
-            requester.send('play-story-unexpected-error', data, sessionId);
+            safeSend(requester, 'play-story-unexpected-error', data, sessionId);
         }
     });
 
@@ -145,7 +181,7 @@ function compile(compileInstruction, requester) {
 
     var sendAnyErrors = () => {
         if( sessions[sessionId] && inkErrors.length > 0 ) {
-            requester.send('play-generated-errors', inkErrors, sessionId);
+            safeSend(requester, 'play-generated-errors', inkErrors, sessionId);
             inkErrors = [];
         }
     };
@@ -158,10 +194,10 @@ function compile(compileInstruction, requester) {
             sendAnyErrors();
 
             if( code == 0 || code === undefined ) {
-                requester.send('inklecate-complete', sessionId, jsonExportPath);
+                safeSend(requester, 'inklecate-complete', sessionId, jsonExportPath);
             }
             else {
-                requester.send('play-exit-due-to-error', code, sessionId);
+                safeSend(requester, 'play-exit-due-to-error', code, sessionId);
             }
         }
     }
@@ -220,7 +256,7 @@ function compile(compileInstruction, requester) {
                     }
                     let msg = issueMatches[6].trim();
                     if( session.evaluatingExpression ) {
-                        requester.send('play-evaluated-expression-error', msg, sessionId);
+                        safeSend(requester, 'play-evaluated-expression-error', msg, sessionId);
                     } else {
                         inkErrors.push({
                             type: issueMatches[1],
@@ -231,25 +267,25 @@ function compile(compileInstruction, requester) {
                     }
                 }
 
-                requester.send('play-generated-errors', inkErrors, sessionId);
+                safeSend(requester, 'play-generated-errors', inkErrors, sessionId);
                 inkErrors = [];
             }
             
             // Compile success?
             else if( jsonResponse["compile-success"] !== undefined ) {
                 if( session.safetyTimeout ) clearTimeout(session.safetyTimeout);
-                requester.send('compile-complete', sessionId);
+                safeSend(requester, 'compile-complete', sessionId);
             }
             
             // Tags
             else if( jsonResponse.tags !== undefined ) {
-                requester.send('play-generated-tags', jsonResponse.tags, sessionId);
+                safeSend(requester, 'play-generated-tags', jsonResponse.tags, sessionId);
             }
 
             // Choices
             else if ( jsonResponse.choices !== undefined ) {
                 for(let i=0; i<jsonResponse.choices.length; i++) {
-                    requester.send("play-generated-choice", {
+                    safeSend(requester, "play-generated-choice", {
                         number: (i+1),
                         choice: jsonResponse.choices[i]
                     }, sessionId);
@@ -258,38 +294,49 @@ function compile(compileInstruction, requester) {
 
             // Input prompt
             else if( jsonResponse.needInput ) {
-                if( session.evaluatingExpression )
+                if( session.cmdReplyReceivedForPrompt ) {
+                    // This prompt directly follows a cmdOutput: it restores the
+                    // prompt for that same command. Replies still in flight for
+                    // commands issued back-to-back must not be cancelled by it.
+                    session.cmdReplyReceivedForPrompt = false;
+                    safeSend(requester, 'play-requires-input', sessionId);
+                } else if( session.evaluatingExpression ) {
+                    // The command was consumed without ever producing a reply:
+                    // reset so future prompts aren't swallowed forever.
                     session.evaluatingExpression = false;
-                else if( session.listingVariables )
+                } else if( session.listingVariables ) {
                     session.listingVariables = false;
-                // else if( session.justRequestedDebugSource )
-                //     session.justRequestedDebugSource = false;
-                else
-                    requester.send('play-requires-input', sessionId);
+                } else
+                    safeSend(requester, 'play-requires-input', sessionId);
             }
             
             // DebugSource and expression result
             else if( jsonResponse.cmdOutput !== undefined ) {
 
+                // Every cmdOutput is followed by a needInput for the same
+                // command - remember that, so the trailing prompt isn't
+                // mistaken for a command that produced no reply.
+                session.cmdReplyReceivedForPrompt = true;
+
                 let debugSourceMatches = jsonResponse.cmdOutput.match(debugSourceRegex);
                 if( debugSourceMatches ) {
                     // session.justRequestedDebugSource = true;
-                    requester.send('return-location-from-source', sessionId, {
+                    safeSend(requester, 'return-location-from-source', sessionId, {
                         lineNumber: parseInt(debugSourceMatches[2]),
                         filename: debugSourceMatches[3]
                     });
                 } else if( session.evaluatingExpression ) {
-                    session.evaluatingExpression = false;
-                    requester.send('play-evaluated-expression', jsonResponse.cmdOutput, sessionId);
+                    session.evaluatingExpression--;
+                    safeSend(requester, 'play-evaluated-expression', jsonResponse.cmdOutput, sessionId);
                 } else if( session.listingVariables ) {
-                    session.listingVariables = false;
-                    requester.send('return-variables-list', jsonResponse.cmdOutput, sessionId);
+                    session.listingVariables--;
+                    safeSend(requester, 'return-variables-list', jsonResponse.cmdOutput, sessionId);
                 }
             }
             
             // Story text
             else if( jsonResponse.text !== undefined ) {
-                requester.send('play-generated-text', jsonResponse.text, sessionId);
+                safeSend(requester, 'play-generated-text', jsonResponse.text, sessionId);
             }
             
             // End of story, but keep process running for debug source lookups
@@ -300,7 +347,7 @@ function compile(compileInstruction, requester) {
             
             // Stats
             else if( jsonResponse.stats ) {
-                requester.send('return-stats', jsonResponse.stats, sessionId);
+                safeSend(requester, 'return-stats', jsonResponse.stats, sessionId);
             }
 
             continue;
@@ -344,11 +391,15 @@ function stop(sessionId) {
     }
 }
 
-function killSessions(optionalBrowserWindow) {
+// Kills every session (no argument), or only the sessions belonging to a
+// specific renderer. The webContents reference must be captured while its
+// window is alive: accessing browserWindow.webContents after destruction
+// throws "Object has been destroyed".
+function killSessions(optionalWebContents) {
     for(var sessionId in sessions) {
 
-        if( !optionalBrowserWindow || sessions[sessionId] &&
-            sessions[sessionId].requesterWebContents == optionalBrowserWindow.webContents ) {
+        if( !optionalWebContents || sessions[sessionId] &&
+            sessions[sessionId].requesterWebContents == optionalWebContents ) {
             stop(sessionId);
         }
     }
@@ -360,20 +411,26 @@ ipc.on("compile", (event, compileInstruction) => {
 
 ipc.on("play-stop-ink", (event, sessionId) => {
     const requester = event.sender;
-    if( stop(sessionId) )
-        requester.send('play-story-stopped', sessionId);
+    if( ownsSession(requester, sessionId) && stop(sessionId) )
+        safeSend(requester, 'play-story-stopped', sessionId);
 });
 
 ipc.on("remove-temp-file", (event, namespace, relativePath) => {
     var uniqueDirPath = path.join(tempInkPath, namespace);
     var normalizedRelPath = relativePath.replace(/\//g, path.sep);
-    var fullPath = path.join(uniqueDirPath, normalizedRelPath);
+    var fullPath = path.resolve(uniqueDirPath, normalizedRelPath);
+    // The renderer supplies both of these: a ".." segment in either would
+    // escape the temp directory and unlink a file it shouldn't.
+    if( !fullPath.startsWith(path.resolve(tempInkPath) + path.sep) ) {
+        console.error(`Refusing to remove temp file outside '${tempInkPath}': ${fullPath}`);
+        return;
+    }
     try { fs.unlinkSync(fullPath); }
     catch(e) { /* file may not exist yet */ }
 });
 
 ipc.on("play-continue-with-choice-number", (event, choiceNumber, sessionId) => {
-    if( sessions[sessionId] ) {
+    if( ownsSession(event.sender, sessionId) ) {
         const playProcess = sessions[sessionId].process;
         if( playProcess )
             playProcess.stdin.write(""+choiceNumber+"\n");
@@ -382,16 +439,19 @@ ipc.on("play-continue-with-choice-number", (event, choiceNumber, sessionId) => {
 
 ipc.on("evaluate-expression", (event, expressionText, sessionId) => {
     var session = sessions[sessionId];
-    if( session ) {
+    if( ownsSession(event.sender, sessionId) ) {
         if( session.process ) {
-            session.evaluatingExpression = true;
+            // Count of outstanding evaluations rather than a flag: each
+            // request gets its own cmdOutput reply, so a second request must
+            // not swallow the first one's answer.
+            session.evaluatingExpression = (session.evaluatingExpression || 0) + 1;
             session.process.stdin.write(`${expressionText}\n`);
         }
     }
 });
 
 ipc.on("get-location-in-source", (event, offset, sessionId) => {
-    if( sessions[sessionId] ) {
+    if( ownsSession(event.sender, sessionId) ) {
         const playProcess = sessions[sessionId].process;
         if( playProcess )
             playProcess.stdin.write("DebugSource("+offset+")\n");
@@ -399,7 +459,7 @@ ipc.on("get-location-in-source", (event, offset, sessionId) => {
 });
 
 ipc.on("get-runtime-path-in-source", (event, runtimePath, sessionId) => {
-    if( sessions[sessionId] ) {
+    if( ownsSession(event.sender, sessionId) ) {
         const playProcess = sessions[sessionId].process;
         if( playProcess )
             playProcess.stdin.write("DebugPath "+runtimePath+"\n");
@@ -407,7 +467,7 @@ ipc.on("get-runtime-path-in-source", (event, runtimePath, sessionId) => {
 });
 
 ipc.on("jump-to-path", (event, path, sessionId) => {
-    if( sessions[sessionId] ) {
+    if( ownsSession(event.sender, sessionId) ) {
         const playProcess = sessions[sessionId].process;
         if( playProcess )
             playProcess.stdin.write("-> "+path+"\n");
@@ -416,9 +476,9 @@ ipc.on("jump-to-path", (event, path, sessionId) => {
 
 ipc.on("list-variables", (event, sessionId) => {
     var session = sessions[sessionId];
-    if( session ) {
+    if( ownsSession(event.sender, sessionId) ) {
         if( session.process ) {
-            session.listingVariables = true;
+            session.listingVariables = (session.listingVariables || 0) + 1;
             session.process.stdin.write("VAR\n");
         }
     }

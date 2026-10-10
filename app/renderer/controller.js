@@ -365,12 +365,16 @@ ExpressionWatchView.eventEmitter.on("listVariables", () => {
         let completed = false;
         const timeout = setTimeout(() => {
             if (!completed) {
+                completed = true;
                 results.push(`${varName} = <timeout>`);
                 queryNext(index + 1);
             }
         }, 2000);
         
         LiveCompiler.evaluateExpression(varName, (result, error) => {
+            // A response arriving after the timeout has already moved on to
+            // the next variable must not walk the chain a second time.
+            if (completed) return;
             completed = true;
             clearTimeout(timeout);
             if (error) {
@@ -554,7 +558,6 @@ function updateTheme(event, newTheme) {
     for (const theme of themes) {
         $(".window").removeClass(theme);
     }
-    LiveCompiler.setEdited();
 }
 
 $(document).ready(() => {

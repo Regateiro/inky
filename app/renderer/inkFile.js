@@ -206,10 +206,10 @@ InkFile.prototype.save = function(afterSaveCallback) {
             if( err ) {
                 console.error("Failed to save file:", err);
                 alert(`${i18n._("Could not save file:")} ${err.message}`);
-                afterSaveCallback(false);
+                if( afterSaveCallback ) afterSaveCallback(false);
             } else {
                 this.hasUnsavedChanges = false;
-                afterSaveCallback(true);
+                if( afterSaveCallback ) afterSaveCallback(true);
             }
         })
     }
@@ -254,8 +254,8 @@ InkFile.prototype.tryLoadFromDisk = function(loadCallback) {
     }
 
     fs.stat(absPath, (err, stats) => {
-        if( err || !stats.isFile() ) { 
-            loadCallback(err.message || "ink file not found");
+        if( err || !stats || !stats.isFile() ) { 
+            loadCallback((err && err.message) || "ink file not found");
             return;
         }
 

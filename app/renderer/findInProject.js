@@ -66,6 +66,10 @@ function escapeRegex(str) {
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// Cap on rendered result rows: the full count is still reported, but a
+// broad search must not build thousands of DOM nodes in one go.
+const MAX_RENDERED_MATCHES = 200;
+
 function doSearch() {
     var query = $searchInput.val();
 
@@ -94,6 +98,9 @@ function doSearch() {
 
     var files = InkProject.currentProject.files;
     var totalMatches = 0;
+    // Rendering every match of a broad search can freeze the UI: count them
+    // all, but only render a bounded number of rows.
+    var renderedMatches = 0;
 
     files.forEach(function(file) {
         var content = file.getValue();
@@ -120,6 +127,10 @@ function doSearch() {
             $results.append($fileHeader);
 
             fileMatches.forEach(function(m) {
+                if( renderedMatches >= MAX_RENDERED_MATCHES )
+                    return;
+                renderedMatches++;
+
                 var displayLine = m.line.trim();
                 if( displayLine.length > 100 )
                     displayLine = displayLine.substring(0, 100) + "...";
@@ -138,6 +149,11 @@ function doSearch() {
             });
         }
     });
+
+    if( totalMatches > MAX_RENDERED_MATCHES ) {
+        $results.prepend($('<li class="fip-truncated">')
+            .text("Showing the first " + MAX_RENDERED_MATCHES + " of " + totalMatches + " matches - refine your search"));
+    }
 
     $matchCount.text(totalMatches + " match" + (totalMatches !== 1 ? "es" : "") + " in " + files.length + " file" + (files.length !== 1 ? "s" : ""));
 }
@@ -244,7 +260,16 @@ $(document).ready(function() {
 
     $panel.find(".fip-close").on("click", hide);
 
-    $searchInput.on("input", doSearch);
+    // Debounce: a search over the whole project is expensive - don't run
+    // one per keystroke.
+    var searchDebounceTimer = null;
+    $searchInput.on("input", function() {
+        if( searchDebounceTimer ) clearTimeout(searchDebounceTimer);
+        searchDebounceTimer = setTimeout(function() {
+            searchDebounceTimer = null;
+            doSearch();
+        }, 150);
+    });
 
     $searchInput.on("keydown", function(e) {
         if( e.keyCode === 13 ) {
