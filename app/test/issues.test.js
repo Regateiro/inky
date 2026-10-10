@@ -1,7 +1,9 @@
-// Issues tests: the compile-issues summary popup — its styling
-// (selectable text) and navigation from an issue row back to the source.
-// Moved here from app/test/app.test.js when the suite was split into category
-// files. Relevant sources: renderer/toolbarView.js, renderer/controller.js.
+// Issues tests: the compile-issues summary — its styling (selectable text),
+// navigation from an issue row back to the source, and the toolbar summary's
+// sorting behaviour. Feature tests moved here from app/test/app.test.js when
+// the suite was split into category files; the M8 regression test came from
+// app/test/robustness.test.js. Relevant sources: renderer/toolbarView.js,
+// renderer/controller.js.
 
 const { test, expect } = require('@playwright/test');
 const { createHarness } = require('./_launch.js');
@@ -53,5 +55,36 @@ test.describe('issues navigation', () => {
       await issueRow.click();
       await window.waitForTimeout(500);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M8: updateIssueSummary mutates the caller's array
+// Bug: toolbarView.js sorts the issues array it was handed in place, silently
+// reordering the caller's data (LiveCompiler's issues list).
+// ---------------------------------------------------------------------------
+test.describe('M8: issue summary sorting', () => {
+  test('updateIssueSummary does not mutate the caller\'s array', async () => {
+    const window = await h.openWindow();
+
+    const result = await window.evaluate(() => {
+      const { ToolbarView } = require('./toolbarView.js');
+      const issues = [
+        { type: 'TODO', filename: '', lineNumber: 5, message: 'todo one' },
+        { type: 'ERROR', filename: '', lineNumber: 2, message: 'error one' },
+        { type: 'WARNING', filename: '', lineNumber: 9, message: 'warning one' },
+      ];
+      const orderBefore = issues.map(i => i.type);
+      ToolbarView.updateIssueSummary(issues);
+      const orderAfter = issues.map(i => i.type);
+      const rows = [...document.querySelectorAll('#toolbar .issue-popup .table .row')]
+        .map(r => r.className);
+      return { orderBefore, orderAfter, rows };
+    });
+
+    expect(result.orderAfter, 'caller array must keep its original order').toEqual(result.orderBefore);
+    // The rendered summary must still be priority-sorted (ERROR first).
+    expect(result.rows.length).toBe(3);
+    expect(result.rows[0], 'rendered issues should still be sorted').toContain('error');
   });
 });

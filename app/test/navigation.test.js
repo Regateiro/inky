@@ -1,6 +1,7 @@
 // Navigation tests: go-to-anything, editor navigation history, path jump, and
-// the knot/stitch sidebar navigation. Moved here from app/test/app.test.js
-// when the suite was split into category files. Relevant sources:
+// the knot/stitch sidebar navigation. Feature tests moved here from
+// app/test/app.test.js when the suite was split into category files; the T8
+// regression test came from app/test/regression.test.js. Relevant sources:
 // renderer/goto.js, renderer/navHistory.js, renderer/navView.js.
 
 const { test, expect } = require('@playwright/test');
@@ -146,5 +147,35 @@ test.describe('knot and stitch navigation', () => {
       return editor.getCursorPosition().row;
     });
     expect(cursorRow).toBeLessThanOrEqual(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T8: Go-to-anything leaks its result-build interval (phantom results)
+// Bug: goto.js refresh() returns early on an empty query BEFORE clearing
+// resultsBuildInterval (and hide() never clears it), so a stale interval keeps
+// rendering old results into the cleared list.
+// ---------------------------------------------------------------------------
+test.describe('T8: phantom results', () => {
+  test('clearing the query clears the results list', async () => {
+    const window = await h.openWindow();
+
+    // Enough matches that the chunked build (10 per 35ms tick) can't finish
+    // before we clear the query.
+    const lines = [];
+    for (let i = 0; i < 300; i++) lines.push(`phantom clue number ${i}`);
+    await h.setEditorContent(window, lines.join('\n'));
+
+    await h.sendToRenderer('goto-anything');
+    await window.waitForTimeout(300);
+
+    await window.locator('#goto-anything input').fill('phantom');
+    await window.waitForTimeout(250); // build interval now running
+
+    await window.locator('#goto-anything input').fill('');
+    await window.waitForTimeout(500); // stale interval keeps appending
+
+    const count = await window.locator('#goto-anything .results li').count();
+    expect(count, 'stale build interval rendered phantom results into an empty list').toBe(0);
   });
 });

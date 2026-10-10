@@ -29,17 +29,17 @@ function createHarness(test) {
     tempDirs: [],
   };
 
-  test.beforeEach(async () => {
+  async function start(envOverrides = {}) {
     state.userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'inky-test-ud-'));
     state.electronApp = await electron.launch({
       args: ['main-process/main.js', '--test-mode', '--user-data-dir', state.userDataDir],
       cwd: APPDIR,
       headless: true,
-      env: { ...process.env, NODE_ENV: 'test' },
+      env: { ...process.env, NODE_ENV: 'test', ...envOverrides },
     });
-  });
+  }
 
-  test.afterEach(async () => {
+  async function stop() {
     if (state.electronApp) {
       await Promise.race([
         state.electronApp.close(),
@@ -52,6 +52,12 @@ function createHarness(test) {
       try { fs.rmSync(state.userDataDir, { recursive: true, force: true }); } catch (e) {}
       state.userDataDir = null;
     }
+  }
+
+  test.beforeEach(async () => { await start(); });
+
+  test.afterEach(async () => {
+    await stop();
     while (state.tempDirs.length) {
       const dir = state.tempDirs.pop();
       try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) {}
@@ -61,6 +67,15 @@ function createHarness(test) {
   return {
     get electronApp() { return state.electronApp; },
     get userDataDir() { return state.userDataDir; },
+    appDir: APPDIR,
+
+    // Close the current instance and start a fresh one with extra env vars
+    // (used by tests that need a mis-configured launch, e.g. M1).
+    async relaunch(envOverrides = {}) {
+      await stop();
+      await start(envOverrides);
+      return state.electronApp;
+    },
 
     // Open the app's main window and wait for the editor to be ready.
     async openWindow() {
@@ -89,10 +104,14 @@ function createHarness(test) {
       }, { channel, args });
     },
 
+    // Register a path (dir or file) for deletion in afterEach.
+    track(p) {
+      state.tempDirs.push(p);
+      return p;
+    },
+
     makeTempDir(prefix) {
-      const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-      state.tempDirs.push(dir);
-      return dir;
+      return this.track(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
     },
   };
 }

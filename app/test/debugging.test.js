@@ -1,8 +1,11 @@
 // Debugging tools tests: project statistics, the variable-query panel (single
-// query, list-all, and that neither breaks the player's choices) and
-// expression watching. Moved here from app/test/app.test.js when the suite
-// was split into category files. Relevant source:
-// renderer/expressionWatchView.js.
+// query, list-all, and that neither breaks the player's choices), expression
+// watching, and the LiveCompiler IPC machinery that backs them (stale replies,
+// the query-timeout race and concurrent evaluations). Feature tests moved here
+// from app/test/app.test.js when the suite was split into category files; the
+// T1/T10/M7 regression tests came from app/test/regression.test.js and
+// app/test/robustness.test.js. Relevant sources: renderer/expressionWatchView.js,
+// renderer/liveCompiler.js.
 
 const { test, expect } = require('@playwright/test');
 const { createHarness } = require('./_launch.js');
@@ -203,5 +206,131 @@ test.describe('expression watch', () => {
 
     const expressionWatch = window.locator('.expressionWatch');
     await expect(expressionWatch).toBeVisible();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T1: stale compiler IPC replies must not throw
+// Bug: liveCompiler.js reads `xxxObj.sessionId` before checking `xxxObj`,
+// and invokes the stats callback without a null guard. Any late, duplicate or
+// unsolicited reply crashes inside the ipc listener.
+// ---------------------------------------------------------------------------
+test.describe('T1: stale compiler IPC replies', () => {
+  test('reply with no pending callback must not throw', async () => {
+    const window = await h.openWindow();
+
+    const attempts = await window.evaluate(() => {
+      const { ipcRenderer } = require('electron');
+      const results = {};
+      const tryEmit = (name, fn) => {
+        try { fn(); results[name] = 'ok'; }
+        catch (e) { results[name] = String(e); }
+      };
+      // All callback slots are empty on a freshly started app.
+      tryEmit('expression', () =>
+        ipcRenderer.emit('play-evaluated-expression', {}, 'text', 'no-such-session'));
+      tryEmit('expressionError', () =>
+        ipcRenderer.emit('play-evaluated-expression-error', {}, 'err', 'no-such-session'));
+      tryEmit('location', () =>
+        ipcRenderer.emit('return-location-from-source', {}, 'no-such-session', {}));
+      tryEmit('variables', () =>
+        ipcRenderer.emit('return-variables-list', {}, 'list', 'no-such-session'));
+      // No stats request in flight => currentStatsSessionId === null
+      tryEmit('stats', () => ipcRenderer.emit('return-stats', {}, {}, null));
+      return results;
+    });
+
+    for (const [name, outcome] of Object.entries(attempts)) {
+      expect(outcome, `handler '${name}' threw for a stale reply`).toBe('ok');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T10: "query all variables" timeout race
+// Bug: controller.js:357-385 — the 2s timeout advances to the next variable
+// but never marks the request completed, so a late response walks the chain a
+// second time and duplicates results.
+// ---------------------------------------------------------------------------
+test.describe('T10: variable query timeout race', () => {
+  test('late response after timeout must not duplicate results', async () => {
+    const window = await h.openWindow();
+
+    await h.setEditorContent(window, 'VAR alpha_num = 1\nVAR beta_num = 2\n');
+    await window.waitForTimeout(500);
+
+    const result = await window.evaluate(async () => {
+      const { LiveCompiler } = require(process.cwd() + '/renderer/liveCompiler.js');
+      const { ExpressionWatchView } =
+        require(process.cwd() + '/renderer/expressionWatchView.js');
+
+      const origEvaluate = LiveCompiler.evaluateExpression;
+      let lateCallback = null;
+      const queried = [];
+      LiveCompiler.evaluateExpression = (expr, cb) => {
+        queried.push(expr);
+        if (!lateCallback) lateCallback = cb; // first variable: never answered now
+        else cb('0', null);                   // later variables answer immediately
+      };
+
+      const readResult = () => {
+        const el = document.querySelector('#player .variableQueryResult');
+        return el ? el.textContent : '';
+      };
+
+      ExpressionWatchView.eventEmitter.emit('listVariables');
+      await new Promise((r) => setTimeout(r, 2400)); // let the 2s timeout fire
+      const before = readResult();
+
+      if (lateCallback) lateCallback('42', null); // response arrives too late
+      await new Promise((r) => setTimeout(r, 300));
+      const after = readResult();
+
+      LiveCompiler.evaluateExpression = origEvaluate;
+      return { before, after, queried };
+    });
+
+    const count = (text, name) => (text.match(new RegExp(name, 'g')) || []).length;
+    expect(result.queried.length, 'sanity: variables were queried').toBeGreaterThanOrEqual(2);
+    expect(count(result.after, 'alpha_num'),
+      'late response re-advanced the query chain (alpha duplicated)').toBe(1);
+    expect(count(result.after, 'beta_num'),
+      'late response re-queried the chain (beta duplicated)').toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M7: LiveCompiler single-slot callbacks
+// Bug: liveCompiler.js keeps one callback slot per request type. A second
+// evaluateExpression (or variables-list) request orphans the first forever —
+// and the surviving slot receives the *first* request's result, so the
+// caller gets the wrong answer.
+// ---------------------------------------------------------------------------
+test.describe('M7: concurrent compiler requests', () => {
+  test('concurrent expression evaluations all get their own answer', async () => {
+    const window = await h.openWindow();
+    await h.setEditorContent(window, 'VAR myVar = 5\nHello World!');
+    await window.waitForFunction(() => {
+      const el = document.querySelector('#player .innerText.active');
+      return el && el.textContent.includes('Hello World!');
+    }, { timeout: 20000 });
+
+    const results = await window.evaluate(async () => {
+      return await new Promise((resolve) => {
+        const { LiveCompiler } = require('./liveCompiler.js');
+        const got = [];
+        LiveCompiler.evaluateExpression('myVar', (r) => { got.push(['a', r]); });
+        LiveCompiler.evaluateExpression('1+1', (r) => { got.push(['b', r]); });
+        const done = () => resolve(got);
+        setTimeout(done, 8000);
+        const check = setInterval(() => {
+          if (got.length >= 2) { clearInterval(check); done(); }
+        }, 50);
+      });
+    });
+
+    expect(results.length, 'both callbacks must fire').toBe(2);
+    expect(results[0], 'first request must get the first answer').toEqual(['a', '5']);
+    expect(results[1], 'second request must get the second answer').toEqual(['b', '2']);
   });
 });

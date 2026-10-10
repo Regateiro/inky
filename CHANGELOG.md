@@ -15,10 +15,11 @@ is updated from the latest inkle/ink release via `make update-deps` (Git LFS).
 
 ### Added
 
-- **Regression test suite** (`app/test/regression.test.js`, T-series) with 11
-  tests, each reproducing a previously verified bug and now guarding its fix.
-- **Robustness test suite** (`app/test/robustness.test.js`, M-series) with 12
-  tests covering the main process and the compiler session lifecycle.
+- **Regression tests** (T-series, 11 tests), each reproducing a previously
+  verified bug and now guarding its fix, folded into the matching per-category
+  test files.
+- **Robustness tests** (M-series, 12 tests) covering the main process and the
+  compiler session lifecycle, likewise folded into the per-category files.
 - **`app/test/TODO.md`** tracking the known bugs, their fixes and the
   pre/post-fix validation records for both suites.
 - **`--user-data-dir` support** so each launch (and each test) can use an
@@ -43,9 +44,10 @@ is updated from the latest inkle/ink release via `make update-deps` (Git LFS).
 - **Test suite** split into per-category files (`launch`, `editor`, `compiler`,
   `player`, `issues`, `navigation`, `find-in-project`, `project`, `debugging`)
   that share a common Electron launch harness (`app/test/_launch.js`),
-  replacing the monolithic `app/test/app.test.js`. The T-series
-  (`regression.test.js`) and M-series (`robustness.test.js`) files are
-  unchanged.
+  replacing the monolithic `app/test/app.test.js`. The T-series and M-series
+  regression/robustness tests were then moved out of their dedicated files
+  (`regression.test.js`, `robustness.test.js`) into the matching category file,
+  so the suite is organised purely by feature area.
 - **`inklecate` compiler binary** (`app/main-process/ink/inklecate_linux`)
   is updated from the latest inkle/ink release via
   `make update-deps`/`build/update-inklecate.sh`, and is stored with Git LFS.

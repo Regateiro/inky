@@ -1,7 +1,8 @@
 // Editor-related tests: theme switching, zoom controls, editor behaviour
 // (cursor preservation, error reporting) and the keyboard-shortcuts dialog.
-// Moved here from app/test/app.test.js when the suite was split into category
-// files. Relevant sources: renderer/controller.js, renderer/editorView.js.
+// Feature tests moved here from app/test/app.test.js when the suite was split
+// into category files; the T9 regression test came from app/test/regression.test.js.
+// Relevant sources: renderer/controller.js, renderer/editorView.js.
 
 const { test, expect } = require('@playwright/test');
 const { createHarness } = require('./_launch.js');
@@ -146,5 +147,37 @@ test.describe('keyboard shortcuts', () => {
       win.webContents.send('keyboard-shortcuts');
     });
     await window.waitForTimeout(2000);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T9: changing the theme triggers a full recompile + replay
+// Bug: controller.js:557 updateTheme() calls LiveCompiler.setEdited(), which
+// makes the compile loop restart and replay the story ~500ms later.
+// ---------------------------------------------------------------------------
+test.describe('T9: theme change', () => {
+  test('changing the theme does not recompile the story', async () => {
+    const window = await h.openWindow();
+
+    await window.evaluate(() => {
+      const { LiveCompiler } = require(process.cwd() + '/renderer/liveCompiler.js');
+      window.__resetCount = 0;
+      LiveCompiler.on('resetting', () => { window.__resetCount++; });
+    });
+
+    // Make an edit so the compile loop definitely runs at least once and the
+    // listener is proven to work.
+    await h.setEditorContent(window, 'Hello world. This is a regression test.');
+    await window.waitForTimeout(3000);
+
+    const baseline = await window.evaluate(() => window.__resetCount);
+    expect(baseline, 'sanity: app compiled after an edit').toBeGreaterThan(0);
+
+    await window.evaluate(() => { window.__resetCount = 0; });
+    await h.sendToRenderer('change-theme', 'dark');
+    await window.waitForTimeout(1800);
+
+    const after = await window.evaluate(() => window.__resetCount);
+    expect(after, 'theme change must not trigger a recompile/replay').toBe(0);
   });
 });
